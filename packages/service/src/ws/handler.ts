@@ -28,6 +28,7 @@ export function createWebSocketHandler() {
 
         // Handle ping for connection health checks
         if (message.action === 'ping') {
+          console.log('[WS] Ping received', message);
           send(ws, { type: 'pong', requestId: message.id });
           return;
         }
