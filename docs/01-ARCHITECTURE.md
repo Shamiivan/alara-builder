@@ -93,7 +93,7 @@ alara/
 │   │   │   └── static/
 │   │   └── package.json
 │   │
-│   ├── runtime/                      # Injected into user's app
+│   ├── buildtime/                      # Injected into user's app
 │   │   ├── src/
 │   │   │   ├── vite-plugin.ts        # Vite plugin entry point
 │   │   │   ├── babel-plugin-alara.ts # ⬅ CSS MODULE RESOLUTION: Traces className → import → cssFile

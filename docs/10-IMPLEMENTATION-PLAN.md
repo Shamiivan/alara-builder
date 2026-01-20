@@ -38,8 +38,8 @@ bunx alara dev
 | **2.1 CSS Cache** | LRU cache for PostCSS ASTs (50MB/100 entry limit, mtime invalidation) |
 | **2.2 Transaction System** | Atomic file writes with backup/rollback on failure |
 | **2.3 JSX Transformer** | ts-morph utilities: findElementAt, addClassName, updateText |
-| **2.4 Babel Plugin** | Build-time injection of `oid` attribute + OID registry population + CSS Module resolution |
-| **2.5 Vite Plugin Enhancement** | Integrate Babel plugin, connect to Bun server for OID registry sync |
+| **2.4 Babel Plugin** | Build-time injection of `oid` + `css` attributes (self-contained, no registry) + CSS Module resolution |
+| **2.5 Vite Plugin Enhancement** | Integrate Babel plugin, connect to Bun server |
 
 ---
 
@@ -142,7 +142,7 @@ Build on CLI shell from Phase 0 with init command and production build.
 |-------|-------------|
 | **10.1 init Command** | Detect project type, install runtime, update vite.config |
 | **10.2 dev Command Polish** | Validate project structure, open browser, graceful shutdown |
-| **10.3 Build Integration** | Production build strips `oid` attributes and OID registry |
+| **10.3 Build Integration** | Production build strips `oid` and `css` attributes |
 | **10.4 Error Messages** | Helpful CLI errors for common misconfigurations |
 
 ---
