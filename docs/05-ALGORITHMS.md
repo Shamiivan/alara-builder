@@ -56,7 +56,11 @@ This document details the core algorithms for CSS/JSX transformations, element i
 ---
 ## 1. Element Identification Algorithm
 
-Elements are identified using **build-time OID (Object ID) injection**. The Vite plugin injects a single `oid` attribute into JSX elements during development builds, with full metadata stored in a global registry (`window.__ALARA_OID_REGISTRY__`). This provides a direct mapping from DOM elements to source code locations while minimizing DOM clutter.
+Elements are identified using **build-time attribute injection**. The Vite plugin injects two self-contained attributes on every JSX element:
+- `oid` - JSX source location: `{file}:{line}:{col}`
+- `css` - CSS Module location: `{cssFile}:{selectors}`
+
+**No registry needed** - all metadata is encoded directly in the attributes.
 
 ### 1.1 Architecture Overview
 
@@ -68,17 +72,16 @@ Elements are identified using **build-time OID (Object ID) injection**. The Vite
 │  ───────────                        ────────────────                     │
 │  <div className={styles.card}>  →   <div                                 │
 │    <h2>Title</h2>                     className={styles.card}            │
-│  </div>                               oid="Card-12-4">                   │
-│                                     <h2 oid="Card-13-6">                 │
+│  </div>                               oid="src/Card.tsx:12:4"            │
+│                                       css="src/Card.module.css:.card">  │
+│                                     <h2                                  │
+│                                       oid="src/Card.tsx:13:6"            │
+│                                       css="src/Card.module.css:.title"> │
 │                                       Title                              │
 │                                     </h2>                                │
 │                                   </div>                                 │
 │                                                                          │
-│  OID Registry (injected into HTML):                                      │
-│  window.__ALARA_OID_REGISTRY__ = new Map([                               │
-│    ['Card-12-4', { oid: 'Card-12-4', file: 'src/Card.tsx', ... }],       │
-│    ['Card-13-6', { oid: 'Card-13-6', file: 'src/Card.tsx', ... }],       │
-│  ]);                                                                     │
+│  All metadata is self-contained in attributes - no registry needed       │
 └─────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
@@ -86,13 +89,13 @@ Elements are identified using **build-time OID (Object ID) injection**. The Vite
 │                        RUNTIME (Browser)                                 │
 │                                                                          │
 │  EditorWrapper:                                                          │
-│  - Finds elements via [oid] attribute                                    │
-│  - Looks up full metadata from window.__ALARA_OID_REGISTRY__             │
+│  - Finds elements via [oid][css] attributes                              │
+│  - Parses attributes directly to extract metadata                        │
 │  - Provides selection context for FloatingToolbox                        │
 │                                                                          │
 │  On Selection:                                                           │
-│  - Read oid attribute → "Card-12-4"                                      │
-│  - Lookup in registry → { file, lineNumber, column, cssFile, selector }  │
+│  - Parse oid: "src/Card.tsx:12:4" → { file, lineNumber, column }         │
+│  - Parse css: "src/Card.module.css:.card" → { cssFile, selectors }       │
 │  - Send ElementTarget to backend for CSS/JSX transforms                  │
 └─────────────────────────────────────────────────────────────────────────┘
                                       │
@@ -103,44 +106,29 @@ Elements are identified using **build-time OID (Object ID) injection**. The Vite
 │  - Receives ElementTarget from frontend (file + line + col + css info)   │
 │  - Parses source file with ts-morph                                      │
 │  - Navigates directly to element at line:col                             │
-│  - Extracts className → finds CSS Module file → applies transforms       │
+│  - Opens cssFile and finds rules by selectors                            │
 │                                                                          │
 │  No fuzzy matching needed - source location is always accurate           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 OID Format and Registry
+### 1.2 Attribute Format
 
-The Vite plugin injects a single `oid` attribute on every JSX element. Full metadata is stored in a global registry:
+The Vite plugin injects two self-contained attributes on every JSX element:
 
-**OID Format**: `{ComponentName}-{line}-{column}` (e.g., `Card-12-4`)
-
-| Component | Description |
-|-----------|-------------|
-| `oid` attribute | Single attribute on DOM element: `oid="Card-12-4"` |
-| `__ALARA_OID_REGISTRY__` | Global Map with full metadata for each oid |
+| Attribute | Format | Example |
+|-----------|--------|---------|
+| `oid` | `{file}:{line}:{col}` | `src/components/Card.tsx:12:4` |
+| `css` | `{cssFile}:{selectors}` | `src/components/Card.module.css:.card .primary` |
 
 ```typescript
-// OID Registry entry (stored in window.__ALARA_OID_REGISTRY__)
-interface OidRegistryEntry {
-  oid: string;        // Unique element ID (matches DOM attribute)
-  file: string;       // Source file path
-  lineNumber: number; // Line number in source (1-indexed)
-  column: number;     // Column number in source (1-indexed)
-  cssFile: string;    // CSS Module file path
-  selector: string;   // CSS selector
-}
-
-// Global registry interface
-interface OidRegistry {
-  get(oid: string): OidRegistryEntry | undefined;
-  entries(): IterableIterator<[string, OidRegistryEntry]>;
-}
-
-declare global {
-  interface Window {
-    __ALARA_OID_REGISTRY__: OidRegistry;
-  }
+// Parsed ElementTarget from DOM attributes
+interface ElementTarget {
+  file: string;        // Source file path
+  lineNumber: number;  // Line number in source (1-indexed)
+  column: number;      // Column number in source (1-indexed)
+  cssFile: string;     // CSS Module file path
+  selectors: string[]; // CSS selectors (e.g., ['.card', '.primary'])
 }
 ```
 
@@ -149,26 +137,28 @@ declare global {
 ```
 Algorithm: SELECT_ELEMENT(domElement: HTMLElement) → ElementTarget | null
 
-1. Read oid from DOM (injected at build time by Vite plugin):
+1. Read attributes from DOM (injected at build time by Vite plugin):
    oid = domElement.getAttribute('oid')
+   css = domElement.getAttribute('css')
 
-2. If oid is missing:
-   - Walk up parent chain until element with oid is found
+2. If attributes are missing:
+   - Walk up parent chain until element with [oid][css] is found
    - If none found: return null (not an editable element)
 
-3. Lookup in global registry:
-   entry = window.__ALARA_OID_REGISTRY__.get(oid)
-   If entry is undefined: return null (orphaned oid)
+3. Parse oid: "src/Card.tsx:12:4"
+   parts = oid.split(':')
+   column = parseInt(parts.pop())
+   lineNumber = parseInt(parts.pop())
+   file = parts.join(':')  // Handle Windows paths with drive letters
 
-4. Return ElementTarget:
-   return {
-     oid: entry.oid,
-     file: entry.file,
-     lineNumber: entry.lineNumber,
-     column: entry.column,
-     cssFile: entry.cssFile,
-     selector: entry.selector
-   }
+4. Parse css: "src/Card.module.css:.card .primary"
+   colonIndex = css.indexOf(':.')
+   cssFile = css.slice(0, colonIndex)
+   selectorsStr = css.slice(colonIndex + 1)
+   selectors = selectorsStr.split(' ').filter(s => s.startsWith('.'))
+
+5. Return ElementTarget:
+   return { file, lineNumber, column, cssFile, selectors }
 ```
 
 ### 1.4 Backend Element Location
@@ -612,7 +602,7 @@ When a file changes externally (e.g., user edits in VS Code), the sync is handle
        │                   │                   │
        │                   │                   │ 6. HMR replaces module
        │                   │                   │    DOM updated with
-       │                   │                   │    new oid attrs + registry
+       │                   │                   │    new oid + css attributes
        │                   │                   │
 ```
 
@@ -652,9 +642,8 @@ Browser-side only (no server involvement):
    Also invalidate cached styles for the file
 
 4. Vite HMR updates DOM automatically:
-   - Plugin re-injects oid attributes with updated line numbers
-   - OID registry is updated with new metadata
-   - DOM elements receive new oid values
+   - Plugin re-injects oid + css attributes with updated values
+   - DOM elements receive new attribute values
    - refreshSelectedElement() re-reads computed styles from DOM
 ```
 

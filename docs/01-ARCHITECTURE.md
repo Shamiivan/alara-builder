@@ -103,7 +103,7 @@ alara/
 │   │   ├── src/
 │   │   │   ├── vite-plugin.ts        # Vite plugin entry point
 │   │   │   ├── babel-plugin-alara.ts # ⬅ CSS MODULE RESOLUTION: Traces className → import → cssFile
-│   │   │   │                         #   Injects: oid attribute + populates OID registry
+│   │   │   │                         #   Injects: oid + css attributes (self-contained)
 │   │   │   ├── wrapper.tsx           # EditorWrapperProps defined here
 │   │   │   └── client.ts             # Uses shared/messages.ts
 │   │   └── package.json
@@ -366,8 +366,7 @@ External file changes are detected via **Vite HMR**, not WebSocket. This elimina
    │
    ▼
 2. Vite detects change, rebuilds module
-   │  - Generates new oids for changed elements
-   │  - Updates OID registry with new line numbers
+   │  - Generates new oid/css attributes for changed elements
    │
    ▼
 3. Vite HMR sends update to browser
@@ -381,7 +380,7 @@ External file changes are detected via **Vite HMR**, not WebSocket. This elimina
    ▼
 5. Vite HMR updates DOM with new styles
    │  - CSS changes applied automatically
-   │  - OID registry updated with new metadata
+   │  - DOM attributes updated with new oid/css values
    │
    ▼
 6. FloatingToolbox re-renders with new values
@@ -427,44 +426,38 @@ maxStackSize: number;  // e.g., 100
 - Redo: Pop from redoStack, apply forward transform, push to undoStack
 - External file changes clear relevant commands from both stacks
 
-### Decision 3: Build-Time OID Injection for Element Identification
+### Decision 3: Build-Time Attribute Injection for Element Identification
 
-**Choice**: Use Vite plugin to inject a single `oid` attribute at build time, with full metadata stored in an **OID Registry**.
+**Choice**: Use Vite plugin to inject two **self-contained attributes** at build time:
+- `oid` - JSX source location: `{file}:{line}:{col}`
+- `css` - CSS Module location: `{cssFile}:{selectors}`
 
-**Why OID (Object ID) Pattern**:
-- **Clean DOM**: Single `oid="btn-12-4"` attribute instead of 5+ data attributes
-- **Rich metadata**: Registry can store more info than DOM attributes allow
-- **Consistent lookup**: Same pattern for all element operations
-- **HMR-friendly**: Registry updates atomically with DOM
+**Why Self-Contained Attributes (No Registry)**:
+- **Simpler architecture**: No registry to sync with DOM
+- **Self-contained**: All metadata encoded directly in attributes
+- **HMR-friendly**: Only DOM attributes need updating
+- **Easier debugging**: Inspect element shows all info directly
 
 **Architecture**:
-```typescript
-// DOM element has single attribute
-<button oid="btn-12-4">Click me</button>
-
-// Full metadata in global registry (injected by Vite plugin)
-window.__ALARA_OID_REGISTRY__ = new Map([
-  ['btn-12-4', {
-    oid: 'btn-12-4',
-    file: 'src/components/Button/Button.tsx',
-    lineNumber: 12,
-    column: 4,
-    cssFile: 'src/components/Button/Button.module.css',
-    selector: '.button',
-  }],
-  // ... more entries
-]);
+```html
+<!-- All metadata encoded in attributes - no registry lookup needed -->
+<button
+  oid="src/components/Button/Button.tsx:12:4"
+  css="src/components/Button/Button.module.css:.button .primary"
+>
+  Click me
+</button>
 ```
 
 **CSS Module Resolution** (at build time):
-The Babel plugin traces `className={styles.X}` back to its CSS Module import and stores in registry:
+The Babel plugin traces `className={styles.X}` back to its CSS Module import:
 
 ```
-className={styles.button}
+className={`${styles.button} ${styles.primary}`}
     ↓ trace import
 import styles from './Button.module.css'
-    ↓ resolve & store in registry
-{ cssFile: 'src/components/Button/Button.module.css', selector: '.button' }
+    ↓ resolve to css attribute
+css="src/components/Button/Button.module.css:.button .primary"
 ```
 
 **Why build-time resolution** (not runtime):
@@ -482,16 +475,15 @@ Alara only supports editing **CSS Module** styles. The following are NOT editabl
 
 **Flow**:
 1. User clicks element in canvas
-2. EditorWrapper reads `oid` attribute from DOM element
-3. Lookup full metadata: `window.__ALARA_OID_REGISTRY__.get(oid)`
-4. Frontend sends `ElementTarget` (oid + resolved metadata) to backend
-5. Backend navigates directly to element at `file:line:col` via ts-morph
-6. For CSS edits, backend opens `cssFile` and finds rule by `selector`
-7. No fuzzy matching needed - source location is always accurate
+2. EditorWrapper parses `oid` and `css` attributes from DOM element
+3. Frontend sends `ElementTarget` to backend (file, line, col, cssFile, selectors)
+4. Backend navigates directly to element at `file:line:col` via ts-morph
+5. For CSS edits, backend opens `cssFile` and finds rules by `selectors`
+6. No fuzzy matching needed - source location is always accurate
 
 **On file change**:
-- Vite rebuilds the file, generating new oids for changed elements
-- HMR updates both DOM elements and OID registry atomically
+- Vite rebuilds the file, generating new `oid` and `css` values
+- HMR updates DOM attributes
 - Selected element automatically has correct location after reload
 
 ### Decision 4: CSS Variables - DOM-First Editing
@@ -669,7 +661,7 @@ interface EditorBehavior {
 
 - Runtime package `@alara/runtime` provides the Vite plugin
 - Plugin runs during dev mode only (production builds unaffected)
-- **OID injection**: Adds `oid` attribute to every JSX element, populates global OID registry
+- **Attribute injection**: Adds `oid` and `css` attributes to every JSX element (self-contained, no registry)
 - **EditorWrapper**: Wraps components to provide selection/hover context at runtime
 - Attributes are used by backend to find source locations; wrappers are for visual editing UI
 

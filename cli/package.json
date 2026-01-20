@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@alara/service": "workspace:*",
     "commander": "^12.1.0"
   },
   "devDependencies": {

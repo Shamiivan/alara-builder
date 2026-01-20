@@ -284,8 +284,10 @@ export const createSelectionSlice: StateCreator<
   selectByPath: (path) => {
     if (path.length === 0) return;
     const target = path[path.length - 1];
+    // Construct oid from target fields: "file:line:col"
+    const oid = `${target.file}:${target.lineNumber}:${target.column}`;
     const domElement = document.querySelector(
-      `[oid="${target.oid}"]`
+      `[oid="${oid}"]`
     ) as HTMLElement;
 
     if (domElement) {
@@ -463,8 +465,9 @@ export const createEditingSlice: StateCreator<
 
     // Restore original text in DOM
     if (textEditingTarget && textEditingOriginal) {
+      const oid = `${textEditingTarget.file}:${textEditingTarget.lineNumber}:${textEditingTarget.column}`;
       const element = document.querySelector(
-        `[oid="${textEditingTarget.oid}"]`
+        `[oid="${oid}"]`
       );
       if (element) {
         element.textContent = textEditingOriginal;
@@ -1834,24 +1837,25 @@ interface ElementMetadata {
 }
 
 /**
- * Single oid attribute on DOM elements.
- * Full metadata is stored in OID registry (window.__ALARA_OID_REGISTRY__).
+ * Self-contained attributes on DOM elements.
+ * All metadata encoded directly - no registry lookup needed.
  */
-interface DOMOidAttribute {
-  oid: string;  // Unique element ID (e.g., 'btn-12-4')
+interface DOMElementAttributes {
+  /** JSX source location: "src/components/Button.tsx:12:4" */
+  oid: string;
+  /** CSS Module location: "src/components/Button.module.css:.button .primary" */
+  css: string;
 }
 
 /**
- * OID Registry entry - full metadata for an element.
- * Looked up via: window.__ALARA_OID_REGISTRY__.get(oid)
+ * Parsed element target from DOM attributes.
  */
-interface OidRegistryEntry {
-  oid: string;
+interface ElementTarget {
   file: string;           // TSX file path
   lineNumber: number;     // Line number (1-indexed)
   column: number;         // Column number (1-indexed)
   cssFile: string;        // CSS Module file path
-  selector: string;       // CSS selector (e.g., '.button')
+  selectors: string[];    // CSS selectors (e.g., ['.button', '.primary'])
 }
 ```
 

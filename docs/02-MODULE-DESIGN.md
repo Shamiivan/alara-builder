@@ -1815,30 +1815,22 @@ Vite plugin that **injects source location and CSS Module attributes** on every 
 These attributes enable the backend to find the correct source files to edit.
 
 **Key responsibilities**:
-1. Inject unique `oid` attribute on every JSX element
-2. **Resolve CSS Module imports** and store metadata in OID registry
-3. Inject Alara client script with OID registry for WebSocket connection
+1. Inject `oid` attribute on every JSX element (encodes file:line:col)
+2. Inject `css` attribute with resolved CSS Module info (encodes cssFile:selectors)
+3. Inject Alara client script for WebSocket connection
 
-> **Design Decision**: CSS file and selector are resolved at **build time** by tracing:
-> `className={styles.button}` → `import styles from './Button.module.css'` → `cssFile` + `selector`
+> **Design Decision**: CSS file and selectors are resolved at **build time** by tracing:
+> `className={styles.button}` → `import styles from './Button.module.css'` → `css` attribute
 >
 > This is more work upfront but ensures:
 > - No runtime CSS file resolution needed
 > - No ambiguity about which file to edit
 > - Clear scope: only CSS Modules are editable (not global styles)
+> - **No registry needed** - all metadata self-contained in attributes
 
 ```typescript
 import type { Plugin } from 'vite';
 import { transformSync } from '@babel/core';
-
-// OID registry populated during build, injected as global
-const oidRegistry = new Map<string, {
-  file: string;
-  lineNumber: number;
-  column: number;
-  cssFile: string;
-  selector: string;
-}>();
 
 export function alaraPlugin(): Plugin {
   return {
@@ -1857,21 +1849,21 @@ export function alaraPlugin(): Plugin {
         return null;
       }
 
-      // Use Babel to inject oid attribute on every JSX element
+      // Use Babel to inject oid + css attributes on every JSX element
       // This transforms:
       //   import styles from './Button.module.css';
-      //   <div className={styles.card}>
+      //   <div className={`${styles.card} ${styles.primary}`}>
       // Into:
-      //   <div className={styles.card} oid="card-12-4">
-      //
-      // And populates OID registry with:
-      //   'card-12-4' → { file, lineNumber, column, cssFile, selector }
+      //   <div
+      //     className={...}
+      //     oid="src/components/Card.tsx:12:4"
+      //     css="src/components/Card.module.css:.card .primary"
+      //   >
       const result = transformSync(code, {
         filename: id,
         plugins: [
           [require.resolve('./babel-plugin-alara'), {
             filename: id,
-            oidRegistry,  // Babel plugin populates this
           }]
         ],
         parserOpts: {
@@ -1883,12 +1875,10 @@ export function alaraPlugin(): Plugin {
     },
 
     transformIndexHtml(html: string) {
-      // Inject Alara client script with OID registry
-      const registryJson = JSON.stringify([...oidRegistry.entries()]);
+      // Inject Alara client script (no registry needed)
       return html.replace(
         '</head>',
-        `<script>window.__ALARA_OID_REGISTRY__=new Map(${registryJson})</script>
-         <script type="module" src="/@alara/client"></script></head>`
+        `<script type="module" src="/@alara/client"></script></head>`
       );
     },
 
@@ -1914,20 +1904,20 @@ export function alaraPlugin(): Plugin {
 
 ### 4.2 Module: `babel-plugin-alara.ts`
 
-Babel plugin that performs the actual AST transformation. Generates unique `oid` attributes and populates the OID registry.
+Babel plugin that performs the actual AST transformation. Generates `oid` and `css` attributes on every JSX element.
 
 > **BUILD-TIME RESOLUTION**: This plugin runs during `vite build` / `vite dev`, NOT at runtime.
-> The CSS file path is resolved once when the file is compiled, stored in the OID registry.
-> At runtime, the frontend reads `oid` and looks up metadata from registry - no CSS resolution needed.
+> All metadata is encoded directly in the attributes - **no registry needed**.
+> At runtime, the frontend parses `oid` and `css` attributes directly from the DOM.
 
-**OID Generation Logic** (all at build time):
+**Attribute Generation Logic** (all at build time):
 1. On file parse: collect all CSS Module imports (`import X from '*.module.css'`)
 2. Build map: `importName` → `cssFilePath` (e.g., `styles` → `./Button.module.css`)
 3. On each JSX element:
-   - Generate unique `oid` from file + line + col (e.g., `btn-12-4`)
-   - If has `className={X.Y}`, resolve CSS file and selector
-   - Store full metadata in OID registry
-   - Inject only `oid` attribute on DOM element
+   - Generate `oid` from file + line + col (e.g., `src/components/Button.tsx:12:4`)
+   - If has `className={X.Y}` or `className={\`${X.Y} ${X.Z}\`}`, resolve CSS file and selectors
+   - Inject `oid` attribute with JSX location
+   - Inject `css` attribute with CSS Module location and selectors
 
 ```typescript
 import { declare } from '@babel/helper-plugin-utils';
@@ -1937,15 +1927,6 @@ import path from 'path';
 interface PluginState {
   filename: string;
   cssImports: Map<string, string>;  // BUILD-TIME map: importName → cssFilePath
-  oidRegistry: Map<string, OidEntry>;  // Shared registry from Vite plugin
-}
-
-interface OidEntry {
-  file: string;
-  lineNumber: number;
-  column: number;
-  cssFile: string;
-  selector: string;
 }
 
 export default declare((api) => {
@@ -1966,21 +1947,20 @@ export default declare((api) => {
         if (specifier?.type === 'ImportDefaultSpecifier') {
           const importName = specifier.local.name;  // e.g., 'styles'
 
-          // Resolve relative path to absolute
+          // Resolve relative path to project-relative
           const cssFilePath = resolveCssPath(state.filename, source);
           state.cssImports.set(importName, cssFilePath);
         }
       },
 
-      // Step 2: Generate oid and populate registry for each JSX element
+      // Step 2: Generate oid + css attributes for each JSX element
       JSXOpeningElement(path, state: PluginState) {
         const { node } = path;
         const loc = node.loc?.start;
         if (!loc) return;
 
-        // Generate unique oid from file basename + line + col
-        const basename = state.filename.split('/').pop()?.replace(/\.[^.]+$/, '') || 'el';
-        const oid = `${basename}-${loc.line}-${loc.column}`;
+        // Generate oid: "src/components/Button.tsx:12:4"
+        const oid = `${state.filename}:${loc.line}:${loc.column}`;
 
         // Try to resolve CSS Module from className
         const classNameAttr = node.attributes.find(
@@ -1989,27 +1969,24 @@ export default declare((api) => {
         );
 
         let cssFile = '';
-        let selector = '';
+        let selectors: string[] = [];
 
         if (classNameAttr) {
           const cssInfo = extractCssInfo(classNameAttr, state.cssImports);
           if (cssInfo) {
             cssFile = cssInfo.cssFile;
-            selector = cssInfo.selector;
+            selectors = cssInfo.selectors;
           }
         }
 
-        // Store full metadata in OID registry
-        state.oidRegistry.set(oid, {
-          file: state.filename,
-          lineNumber: loc.line,
-          column: loc.column,
-          cssFile,
-          selector,
-        });
-
-        // Inject only oid attribute on element
+        // Inject oid attribute: "src/components/Button.tsx:12:4"
         node.attributes.push(createAttr('oid', oid));
+
+        // Inject css attribute if CSS Module found: "src/Button.module.css:.button .primary"
+        if (cssFile && selectors.length > 0) {
+          const cssValue = `${cssFile}:${selectors.join(' ')}`;
+          node.attributes.push(createAttr('css', cssValue));
+        }
       },
     },
 
@@ -2021,41 +1998,57 @@ export default declare((api) => {
 });
 
 /**
- * Extract CSS file and selector from className attribute.
- * Handles: className={styles.button}
- * Returns: { cssFile: 'src/Button.module.css', selector: '.button' }
+ * Extract CSS file and selectors from className attribute.
+ * Handles:
+ *   - className={styles.button}
+ *   - className={`${styles.button} ${styles.primary}`}
+ * Returns: { cssFile: 'src/Button.module.css', selectors: ['.button', '.primary'] }
  */
 function extractCssInfo(
   attr: t.JSXAttribute,
   cssImports: Map<string, string>
-): { cssFile: string; selector: string } | null {
+): { cssFile: string; selectors: string[] } | null {
   const value = attr.value;
 
-  // Handle: className={styles.button}
-  if (t.isJSXExpressionContainer(value)) {
-    const expr = value.expression;
+  if (!t.isJSXExpressionContainer(value)) return null;
 
-    // Simple case: styles.button
-    if (t.isMemberExpression(expr) &&
-        t.isIdentifier(expr.object) &&
-        t.isIdentifier(expr.property)) {
-      const importName = expr.object.name;    // 'styles'
-      const className = expr.property.name;   // 'button'
+  const expr = value.expression;
+  const selectors: string[] = [];
+  let cssFile = '';
 
-      const cssFile = cssImports.get(importName);
-      if (cssFile) {
-        return {
-          cssFile,
-          selector: `.${className}`,
-        };
-      }
+  // Simple case: styles.button
+  if (t.isMemberExpression(expr) &&
+      t.isIdentifier(expr.object) &&
+      t.isIdentifier(expr.property)) {
+    const importName = expr.object.name;
+    const className = expr.property.name;
+
+    cssFile = cssImports.get(importName) || '';
+    if (cssFile) {
+      selectors.push(`.${className}`);
     }
-
-    // TODO: Handle template literals: `${styles.button} ${styles.large}`
-    // For now, only first class is tracked
   }
 
-  return null;
+  // Template literal: `${styles.button} ${styles.primary}`
+  if (t.isTemplateLiteral(expr)) {
+    for (const exprPart of expr.expressions) {
+      if (t.isMemberExpression(exprPart) &&
+          t.isIdentifier(exprPart.object) &&
+          t.isIdentifier(exprPart.property)) {
+        const importName = exprPart.object.name;
+        const className = exprPart.property.name;
+
+        const resolvedCssFile = cssImports.get(importName);
+        if (resolvedCssFile) {
+          // All classes should come from same CSS file
+          if (!cssFile) cssFile = resolvedCssFile;
+          selectors.push(`.${className}`);
+        }
+      }
+    }
+  }
+
+  return selectors.length > 0 ? { cssFile, selectors } : null;
 }
 
 function createAttr(name: string, value: string): t.JSXAttribute {
@@ -2073,8 +2066,8 @@ function resolveCssPath(tsxFile: string, cssImport: string): string {
 ```
 
 **Limitations** (documented scope):
-- Only tracks single CSS Module per element (first `styles.X` wins)
-- Template literals with multiple classes: only first class tracked
+- Only tracks CSS Modules from same file per element
+- Conditional classes (ternary expressions) not yet tracked
 - Global CSS imports (without `.module.css`) are ignored
 - Inline styles are handled separately (not through this plugin)
 
@@ -2083,7 +2076,7 @@ function resolveCssPath(tsxFile: string, cssImport: string): string {
 Wrapper component for **runtime selection context**.
 
 **Separation of concerns**:
-- **`oid` attribute**: Single ID injected on JSX elements by Vite plugin. Full metadata stored in OID registry.
+- **`oid` + `css` attributes**: Self-contained attributes injected on JSX elements by Vite plugin. No registry needed.
 - **EditorWrapper**: Provides runtime context for selection/hover overlays and visual editing features.
 
 ```typescript

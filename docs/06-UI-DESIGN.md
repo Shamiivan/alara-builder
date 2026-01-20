@@ -287,12 +287,10 @@ export function Canvas({ children }: CanvasProps) {
     e.stopPropagation();
 
     const target = e.target as HTMLElement;
-    const alaraElement = target.closest('[oid]') as HTMLElement;
+    const alaraElement = target.closest('[oid][css]') as HTMLElement;
 
     if (alaraElement) {
-      const oid = alaraElement.getAttribute('oid')!;
-      const elementTarget = window.__ALARA_OID_REGISTRY__.get(oid);
-
+      const elementTarget = getElementTarget(alaraElement);
       if (elementTarget) {
         useEditorStore.getState().selectElement(target, elementTarget);
       }
@@ -306,17 +304,14 @@ export function Canvas({ children }: CanvasProps) {
     if (previewMode) return;
 
     const target = e.target as HTMLElement;
-    const alaraElement = target.closest('[oid]') as HTMLElement;
+    const alaraElement = target.closest('[oid][css]') as HTMLElement;
 
     if (alaraElement && alaraElement !== selectedElement?.domElement) {
       const bounds = alaraElement.getBoundingClientRect();
-      useEditorStore.getState().hoverElement({
-        file: alaraElement.dataset.alaraFile!,
-        lineNumber: parseInt(alaraElement.dataset.alaraLine!, 10),
-        column: parseInt(alaraElement.dataset.alaraCol!, 10),
-        cssFile: alaraElement.dataset.alaraCss!,
-        selector: alaraElement.dataset.alaraSelector!,
-      }, bounds);
+      const elementTarget = getElementTarget(alaraElement);
+      if (elementTarget) {
+        useEditorStore.getState().hoverElement(elementTarget, bounds);
+      }
     }
   }, [previewMode, selectedElement]);
 

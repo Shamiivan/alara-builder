@@ -149,43 +149,30 @@ type TransformType =
   | 'remove-variant';   // Remove variant from className
 
 /**
- * ElementTarget identifies an element via its `oid` attribute.
- * The oid is a unique identifier injected at build time by the Vite plugin.
- * Full metadata is looked up from the OID Registry.
+ * ElementTarget identifies an element for editing.
+ * Data is extracted directly from DOM attributes injected at build time.
+ *
+ * DOM attributes:
+ *   oid="src/components/Button.tsx:12:4"     → file, lineNumber, column
+ *   css="src/components/Button.module.css:.button .primary" → cssFile, selectors
+ *
+ * No registry needed - attributes are self-contained.
  */
 interface ElementTarget {
-  oid: string;            // Unique element ID from DOM attribute (e.g., 'btn-12-4')
   file: string;           // TSX file path: 'src/components/Button/Button.tsx'
   lineNumber: number;     // 1-indexed line number
   column: number;         // 1-indexed column number
   cssFile: string;        // CSS Module path: 'src/components/Button/Button.module.css'
-  selector: string;       // CSS selector: '.button'
-}
-
-/**
- * OID Registry maps oid → ElementTarget metadata.
- * Populated at build time by Vite plugin, injected as a global script.
- *
- * DOM element only has: <button oid="btn-12-4">
- * Registry provides: { file, lineNumber, column, cssFile, selector }
- */
-interface OidRegistry {
-  get(oid: string): ElementTarget | undefined;
-  entries(): IterableIterator<[string, ElementTarget]>;
-}
-
-// Global registry instance (injected by Vite plugin)
-declare global {
-  interface Window {
-    __ALARA_OID_REGISTRY__: OidRegistry;
-  }
+  selectors: string[];    // CSS selectors: ['.button', '.primary']
 }
 
 /**
  * NOTE: Alara only supports editing CSS Module styles.
  * Global styles, inherited styles, and inline styles are NOT editable.
- * The cssFile and selector are resolved at build time by tracing:
- *   className={styles.button} → import styles from './Button.module.css' → cssFile + selector
+ * The cssFile and selectors are resolved at build time by tracing:
+ *   className={`${styles.button} ${styles.primary}`}
+ *   → import styles from './Button.module.css'
+ *   → cssFile + selectors
  */
 
 type TransformChange =
@@ -639,7 +626,7 @@ export function useViteHMR() {
 
 **Why Vite HMR instead of WebSocket?**
 - Vite HMR and WebSocket would race - no guaranteed order
-- HMR updates DOM and OID registry with new element metadata
+- HMR updates DOM with new `oid` and `css` attributes
 - Single source of truth eliminates sync issues
 
 #### Error Message
@@ -726,24 +713,25 @@ import {
 
 ### 3.1 Element Identification
 
-Elements are identified using a single **`oid` attribute** injected at build time. The Vite plugin:
-1. Generates a unique `oid` for each JSX element
-2. Injects `oid="xxx"` on the DOM element
-3. Populates a global **OID Registry** with the full metadata (file, line, col, cssFile, selector)
+Elements are identified using two **self-contained DOM attributes** injected at build time:
 
-This keeps the DOM clean (single attribute) while providing rich metadata via lookup.
+| Attribute | Format | Example |
+|-----------|--------|---------|
+| `oid` | `{file}:{line}:{col}` | `src/components/Button.tsx:12:4` |
+| `css` | `{cssFile}:{selectors}` | `src/components/Button.module.css:.button .primary` |
+
+**No registry needed** - all metadata is encoded directly in the attributes.
 
 ```typescript
 // schemas/element.ts
 import { z } from 'zod';
 
 export const ElementTargetSchema = z.object({
-  oid: z.string().min(1),
   file: z.string().min(1).regex(/\.(tsx?|jsx?)$/, 'Must be a TypeScript/JavaScript file'),
   lineNumber: z.number().int().positive(),
   column: z.number().int().positive(),
   cssFile: z.string().min(1).regex(/\.module\.css$/, 'Must be a CSS Module file'),
-  selector: z.string().min(1).startsWith('.'),
+  selectors: z.array(z.string().min(1).startsWith('.')).min(1),
 });
 
 // TypeScript type is inferred from schema
@@ -752,35 +740,44 @@ export type ElementTarget = z.infer<typeof ElementTargetSchema>;
 /**
  * ElementTarget identifies an element in source code.
  *
- * @property oid - Unique element ID from DOM `oid` attribute
  * @property file - Relative file path from project root
  * @property lineNumber - 1-indexed line number where element starts
  * @property column - 1-indexed column number
  * @property cssFile - CSS Module file path
- * @property selector - CSS Module selector (e.g., '.button')
+ * @property selectors - CSS Module selectors (e.g., ['.button', '.primary'])
  */
 
 /**
- * Extract ElementTarget from a DOM element using oid attribute + registry lookup.
+ * Extract ElementTarget from a DOM element by parsing oid + css attributes.
  */
 function getElementTarget(element: HTMLElement): ElementTarget | null {
   const oid = element.getAttribute('oid');
+  const css = element.getAttribute('css');
 
-  if (!oid) {
-    // Walk up the DOM tree to find nearest element with oid
-    const parent = element.closest('[oid]') as HTMLElement | null;
+  if (!oid || !css) {
+    // Walk up the DOM tree to find nearest element with both attributes
+    const parent = element.closest('[oid][css]') as HTMLElement | null;
     if (!parent) return null;
     return getElementTarget(parent);
   }
 
-  // Look up full metadata from registry
-  const target = window.__ALARA_OID_REGISTRY__.get(oid);
-  if (!target) {
-    console.warn(`[Alara] No registry entry for oid: ${oid}`);
+  // Parse oid: "src/components/Button.tsx:12:4"
+  const oidParts = oid.split(':');
+  const column = parseInt(oidParts.pop()!, 10);
+  const lineNumber = parseInt(oidParts.pop()!, 10);
+  const file = oidParts.join(':'); // Handle Windows paths with drive letters
+
+  // Parse css: "src/components/Button.module.css:.button .primary"
+  const cssColonIndex = css.indexOf(':.');
+  if (cssColonIndex === -1) {
+    console.warn(`[Alara] Invalid css attribute format: ${css}`);
     return null;
   }
+  const cssFile = css.slice(0, cssColonIndex);
+  const selectorsStr = css.slice(cssColonIndex + 1); // includes leading dot
+  const selectors = selectorsStr.split(' ').filter(s => s.startsWith('.'));
 
-  return target;
+  return { file, lineNumber, column, cssFile, selectors };
 }
 ```
 
@@ -1468,7 +1465,7 @@ interface BoxSides<T> {
 ```typescript
 /**
  * EditorWrapper provides runtime context for visual editing.
- * The Vite plugin injects `oid` attributes and populates the OID registry.
+ * The Vite plugin injects `oid` and `css` attributes on JSX elements.
  */
 interface EditorWrapperProps {
   /** Wrapped children */
@@ -1476,23 +1473,12 @@ interface EditorWrapperProps {
 }
 
 /**
- * Single attribute injected on every JSX element by the Vite plugin.
- * Full metadata is looked up from window.__ALARA_OID_REGISTRY__.
+ * Attributes injected on every JSX element by the Vite plugin.
+ * All metadata is self-contained - no registry lookup needed.
  */
-interface AlaraElementAttribute {
-  oid: string;  // Unique element identifier (e.g., 'btn-12-4')
-}
-
-/**
- * OID Registry entry - full metadata for an element.
- * Populated by Vite plugin, accessed via window.__ALARA_OID_REGISTRY__.get(oid)
- */
-interface OidRegistryEntry {
-  file: string;       // 'src/components/Button/Button.tsx'
-  lineNumber: number; // 12
-  column: number;     // 4
-  cssFile: string;    // 'src/components/Button/Button.module.css'
-  selector: string;   // '.button'
+interface AlaraElementAttributes {
+  oid: string;  // JSX location: "src/components/Button.tsx:12:4"
+  css: string;  // CSS location: "src/components/Button.module.css:.button .primary"
 }
 ```
 
@@ -1572,16 +1558,14 @@ const ERROR_MESSAGES: Record<ErrorCode, string> = {
 ```typescript
 import { parseCssValue, toValue } from '@alara/core/shared';
 
-// 1. User selects an element - client reads oid attribute and looks up metadata
-const oid = selectedElement.getAttribute('oid');  // 'btn-12-4'
-const target = window.__ALARA_OID_REGISTRY__.get(oid);
+// 1. User selects an element - client parses oid + css attributes
+const target = getElementTarget(selectedElement);
 // Returns: {
-//   oid: 'btn-12-4',
 //   file: 'src/components/Button/Button.tsx',
 //   lineNumber: 12,
 //   column: 4,
 //   cssFile: 'src/components/Button/Button.module.css',
-//   selector: '.button'
+//   selectors: ['.button']
 // }
 
 // 2. Client reads current computed value from browser
@@ -1624,9 +1608,8 @@ const response: TransformResultMessage = {
 ```typescript
 import { parseCssValue } from '@alara/core/shared';
 
-// 1. User selects element - read oid and look up target from registry
-const oid = selectedElement.getAttribute('oid');
-const target = window.__ALARA_OID_REGISTRY__.get(oid);
+// 1. User selects element - parse oid + css attributes
+const target = getElementTarget(selectedElement);
 
 // 2. User creates "large" variant with typed styles
 const request: AddVariantRequest = {
