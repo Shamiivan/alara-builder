@@ -305,7 +305,7 @@ describe('css-update handler', () => {
           lineNumber: 10,
           column: 4,
           cssFile: 'button.module.css',
-          selector: '.button',
+          selectors: ['.button'],
         },
         change: {
           property: 'padding',
@@ -330,7 +330,7 @@ describe('css-update handler', () => {
       await transformRegistry.execute({
         type: 'css-update',
         id: 'test-2',
-        target: { file: 'Test.tsx', lineNumber: 1, column: 1, cssFile: 'test.css', selector: '.button' },
+        target: { file: 'Test.tsx', lineNumber: 1, column: 1, cssFile: 'test.css', selectors: ['.button'] },
         change: { property: 'padding', computedValue: { type: 'unit', value: 12, unit: 'px' }, newValue: { type: 'unit', value: 16, unit: 'px' } },
       }, ctx);
 
@@ -346,7 +346,7 @@ describe('css-update handler', () => {
         transformRegistry.execute({
           type: 'css-update',
           id: 'test-3',
-          target: { file: 'Test.tsx', lineNumber: 1, column: 1, cssFile: 'test.css', selector: '.nonexistent' },
+          target: { file: 'Test.tsx', lineNumber: 1, column: 1, cssFile: 'test.css', selectors: ['.nonexistent'] },
           change: { property: 'padding', computedValue: { type: 'unit', value: 12, unit: 'px' }, newValue: { type: 'unit', value: 16, unit: 'px' } },
         }, ctx)
       ).rejects.toThrow('SELECTOR_NOT_FOUND');
@@ -381,7 +381,7 @@ describe('add-variant handler', () => {
     await transformRegistry.execute({
       type: 'add-variant',
       id: 'test-1',
-      target: { file: 'Button.tsx', lineNumber: 10, column: 4, selector: '.button' },
+      target: { file: 'Button.tsx', lineNumber: 10, column: 4, selectors: ['.button'] },
       change: {
         variantName: 'large',
         cssFile: 'button.module.css',
@@ -406,7 +406,7 @@ describe('add-variant handler', () => {
       transformRegistry.execute({
         type: 'add-variant',
         id: 'test-2',
-        target: { file: 'Button.tsx', lineNumber: 10, column: 4, selector: '.button' },
+        target: { file: 'Button.tsx', lineNumber: 10, column: 4, selectors: ['.button'] },
         change: {
           variantName: 'large',
           cssFile: 'button.module.css',
@@ -649,7 +649,7 @@ describe('text-update handler', () => {
       await transformRegistry.execute({
         type: 'text-update',
         id: 'test-1',
-        target: { file: 'test.tsx', lineNumber: 3, column: 18, selector: '' },
+        target: { file: 'test.tsx', lineNumber: 3, column: 18, selectors: [] },
         change: {
           originalText: 'Click me',
           newText: 'Submit',
@@ -675,7 +675,7 @@ describe('text-update handler', () => {
       await transformRegistry.execute({
         type: 'text-update',
         id: 'test-2',
-        target: { file: 'test.tsx', lineNumber: 4, column: 1, selector: '' },
+        target: { file: 'test.tsx', lineNumber: 4, column: 1, selectors: [] },
         change: { originalText: 'Click me', newText: 'Submit' },
       }, ctx);
 
@@ -696,7 +696,7 @@ describe('text-update handler', () => {
         transformRegistry.execute({
           type: 'text-update',
           id: 'test-3',
-          target: { file: 'test.tsx', lineNumber: 3, column: 1, selector: '' },
+          target: { file: 'test.tsx', lineNumber: 3, column: 1, selectors: [] },
           change: { originalText: 'Nonexistent', newText: 'Submit' },
         }, ctx)
       ).rejects.toThrow('TEXT_NOT_FOUND');
@@ -714,7 +714,7 @@ describe('text-update handler', () => {
       await transformRegistry.execute({
         type: 'text-update',
         id: 'test-4',
-        target: { file: 'test.tsx', lineNumber: 3, column: 1, selector: '' },
+        target: { file: 'test.tsx', lineNumber: 3, column: 1, selectors: [] },
         change: { originalText: '$99.99', newText: '$149.99' },
       }, ctx);
 
@@ -831,7 +831,7 @@ describe('Transform Schemas', () => {
         lineNumber: 12,
         column: 5,
         cssFile: 'src/components/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       };
 
       const result = ElementTargetSchema.safeParse(target);
@@ -844,7 +844,7 @@ describe('Transform Schemas', () => {
         lineNumber: 12,
         column: 5,
         cssFile: 'src/components/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       };
 
       const result = ElementTargetSchema.safeParse(target);
@@ -857,7 +857,7 @@ describe('Transform Schemas', () => {
         lineNumber: -1,
         column: 5,
         cssFile: 'src/components/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       };
 
       const result = ElementTargetSchema.safeParse(target);
@@ -870,7 +870,7 @@ describe('Transform Schemas', () => {
         lineNumber: 12,
         column: 5,
         cssFile: 'src/components/Button.module.css',
-        selector: 'button',  // Missing dot
+        selectors: ['button'],  // Missing dot
       };
 
       const result = ElementTargetSchema.safeParse(target);
@@ -883,7 +883,7 @@ describe('Transform Schemas', () => {
         lineNumber: 12,
         column: 5,
         cssFile: 'src/styles/global.css',  // Not a CSS Module
-        selector: '.button',
+        selectors: ['.button'],
       };
 
       const result = ElementTargetSchema.safeParse(target);
@@ -950,7 +950,7 @@ describe('Transform Schemas', () => {
           lineNumber: 12,
           column: 5,
           cssFile: 'src/components/Button.module.css',
-          selector: '.button',
+          selectors: ['.button'],
         },
         change: {
           property: 'padding',
@@ -993,7 +993,7 @@ describe('EditorStore', () => {
         lineNumber: 12,
         column: 5,
         cssFile: 'src/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       };
 
       act(() => {
@@ -1012,7 +1012,7 @@ describe('EditorStore', () => {
         lineNumber: 12,
         column: 5,
         cssFile: 'src/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       };
 
       // Set hover first
@@ -1038,7 +1038,7 @@ describe('EditorStore', () => {
           lineNumber: 12,
           column: 5,
           cssFile: 'src/Button.module.css',
-          selector: '.button',
+          selectors: ['.button'],
         },
         before: { property: 'padding', value: '12px' },
         after: { property: 'padding', value: '16px' },
@@ -1136,7 +1136,7 @@ describe('EditorStore', () => {
       const pendingEdits = new Map([
         ['edit-1', {
           id: 'edit-1',
-          target: { file: 'src/Button.tsx', lineNumber: 12, column: 5, cssFile: 'src/Button.module.css', selector: '.button' },
+          target: { file: 'src/Button.tsx', lineNumber: 12, column: 5, cssFile: 'src/Button.module.css', selectors: ['.button'] },
           type: 'css-update' as const,
           change: { property: 'padding', value: '16px' },
           status: 'pending' as const,
@@ -1158,7 +1158,7 @@ describe('EditorStore', () => {
       const command = {
         id: 'cmd-1',
         type: 'update-style' as const,
-        target: { file: 'src/Button.tsx', lineNumber: 12, column: 5, cssFile: 'src/Button.module.css', selector: '.button' },
+        target: { file: 'src/Button.tsx', lineNumber: 12, column: 5, cssFile: 'src/Button.module.css', selectors: ['.button'] },
         before: {},
         after: {},
         timestamp: Date.now(),
@@ -1247,7 +1247,7 @@ export function Button() {
         lineNumber: 3,
         column: 10,
         cssFile: 'src/components/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       },
       change: {
         property: 'padding',
@@ -1276,7 +1276,7 @@ export function Button() {
         lineNumber: 3,
         column: 10,
         cssFile: 'src/components/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       },
       change: {
         variantName: 'large',
@@ -1315,7 +1315,7 @@ export function Button() {
         lineNumber: 999,  // Invalid line
         column: 10,
         cssFile: 'src/components/Button.module.css',
-        selector: '.button',
+        selectors: ['.button'],
       },
       change: {
         variantName: 'newvariant',
@@ -1386,7 +1386,7 @@ describe('FileWatcher Integration', () => {
       lineNumber: 1,
       column: 5,
       cssFile: 'src/test.module.css',
-      selector: '.button',
+      selectors: ['.button'],
     });
     expect(engine.cache.has('src/test.module.css')).toBe(true);
 
@@ -1409,7 +1409,7 @@ describe('FileWatcher Integration', () => {
       lineNumber: 1,
       column: 5,
       cssFile: 'src/test.module.css',
-      selector: '.button',
+      selectors: ['.button'],
     });
 
     // Modify file
@@ -1595,7 +1595,7 @@ export function Button() {
           file: 'src/components/Button.tsx',
           lineNumber: 3,
           cssFile: 'src/components/Button.module.css',
-          selector: '.button',
+          selectors: ['.button'],
         },
         change: {
           property: 'padding',
@@ -1621,7 +1621,7 @@ export function Button() {
         target: {
           file: 'src/components/NonExistent.tsx',
           lineNumber: 1,
-          selector: '.button',
+          selectors: ['.button'],
         },
         change: {
           property: 'padding',
@@ -1642,7 +1642,7 @@ export function Button() {
         target: {
           file: 'src/components/Button.tsx',
           lineNumber: 3,
-          selector: '.button',
+          selectors: ['.button'],
         },
         change: {
           property: 'color',
@@ -2241,7 +2241,7 @@ export function createElementTarget(overrides: Partial<ElementTarget> = {}): Ele
     lineNumber: 10,
     column: 5,
     cssFile: 'src/components/Button.module.css',
-    selector: '.button',
+    selectors: ['.button'],
     ...overrides,
   };
 }
@@ -2250,20 +2250,9 @@ export function createMockDOMElement(tag = 'button'): HTMLElement {
   const element = document.createElement(tag);
   element.className = 'Button_button__abc123';
 
-  // Set oid attribute
-  const oid = 'Button-10-5';
-  element.setAttribute('oid', oid);
-
-  // Populate mock OID registry
-  window.__ALARA_OID_REGISTRY__ = window.__ALARA_OID_REGISTRY__ || new Map();
-  window.__ALARA_OID_REGISTRY__.set(oid, {
-    oid,
-    file: 'src/components/Button.tsx',
-    lineNumber: 10,
-    column: 5,
-    cssFile: 'src/components/Button.module.css',
-    selector: '.button',
-  });
+  // Set oid and css attributes (self-contained, no registry needed)
+  element.setAttribute('oid', 'src/components/Button.tsx:10:5');
+  element.setAttribute('css', 'src/components/Button.module.css:.button');
 
   return element;
 }
