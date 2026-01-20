@@ -1,0 +1,20 @@
+{
+  "name": "alara-builder",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Visual editor for React + CSS Modules",
+  "scripts": {
+    "dev": "pnpm --filter @alara/cli dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

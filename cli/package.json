@@ -1,0 +1,27 @@
+{
+  "name": "@alara/cli",
+  "version": "0.1.0",
+  "description": "CLI for Alara visual editor",
+  "type": "module",
+  "bin": {
+    "alara": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts dev",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.7.0"
+  }
+}

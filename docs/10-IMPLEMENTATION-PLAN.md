@@ -13,6 +13,7 @@ Validate integration early: CLI → Vite plugin → Bun server → client runtim
 | **0.1 CLI Entry** | Commander.js setup with `alara dev` command (stub that starts server) |
 | **0.2 Vite Plugin Shell** | Plugin entry point, dev-only no-op transform, client script injection |
 | **0.3 Bun Server Shell** | Bun.serve() with WebSocket upgrade, echo messages back |
+bunx alara dev
 | **0.4 Client Runtime** | Injected script that connects to WebSocket, logs connection status |
 | **0.5 Integration Smoke Test** | E2E test: `alara dev` starts → client connects → message round-trips |
 
