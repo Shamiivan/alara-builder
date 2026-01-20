@@ -9,13 +9,7 @@ Alara Builder is a standalone Bun-based service that provides visual editing cap
 Monorepo using pnpm workspaces with **apps/** for deployables and **packages/** for shared libraries.
 This structure follows the **Open/Closed Principle**: add new features by adding files, not modifying existing ones.
 
-### Type Organization (Hybrid Approach)
-
-Types are organized as:
-- **Shared contracts** → `packages/core/src/shared/` (API boundaries, WebSocket messages, CSS values)
-- **Implementation types** → Colocated with their features (component props, internal types)
-
-This avoids a separate `packages/types` while keeping shared contracts in one place.
+### Project Structure
 
 ```
 alara/
@@ -35,7 +29,7 @@ alara/
 │       │   │   ├── FloatingToolbox/
 │       │   │   ├── Toolbar/
 │       │   │   └── ...
-│       │   ├── behaviors/            # ⬅ EDITOR BEHAVIORS (Open/Closed)
+│       │   ├── behaviors/            # ⬅ EDITOR BEHAVIORS 
 │       │   │   ├── registry.ts       #   EditorBehaviorsRegistry defined here
 │       │   │   └── handlers/         #   Add new behaviors here
 │       │   │       ├── index.ts      #   Auto-imports all behaviors
@@ -56,7 +50,7 @@ alara/
 ├── packages/
 │   ├── core/                         # Business logic + shared types
 │   │   ├── src/
-│   │   │   ├── shared/               # ═══ SHARED CONTRACTS (like Next.js) ═══
+│   │   │   ├── shared/               # ═══ SHARED CONTRACTS  ═══
 │   │   │   │   ├── css-values.ts     # StyleValue types + Zod schemas + parsers
 │   │   │   │   ├── messages.ts       # WebSocket message types + schemas
 │   │   │   │   ├── transforms.ts     # Transform request/response types
