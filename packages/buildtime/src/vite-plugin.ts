@@ -66,99 +66,48 @@ export function alaraPlugin(options: AlaraPluginOptions = {}): Plugin {
 
 function generateClientScript(port: number): string {
   return `
-// Alara Client - Phase 0.4
 const ALARA_WS_URL = 'ws://localhost:${port}/ws';
 
 let ws = null;
-let status = 'disconnected';
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 1000;
-const pending = new Map();
-
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
 
 function connect() {
-  status = 'connecting';
   ws = new WebSocket(ALARA_WS_URL);
 
   ws.onopen = () => {
-    console.log('[Alara] Connected');
-    status = 'connected';
+    console.log('[Alara] Connected to dev server');
     reconnectAttempts = 0;
   };
 
   ws.onmessage = (event) => {
     try {
-      const msg = JSON.parse(event.data);
-      console.log('[Alara] ←', msg);
-
-      // Handle response correlation
-      if (msg.requestId && pending.has(msg.requestId)) {
-        const { resolve } = pending.get(msg.requestId);
-        pending.delete(msg.requestId);
-        resolve(msg);
-      }
+      const message = JSON.parse(event.data);
+      console.log('[Alara] Received:', message);
     } catch (e) {
-      console.error('[Alara] Parse error:', e);
+      console.error('[Alara] Failed to parse message:', e);
     }
   };
 
   ws.onclose = () => {
     console.log('[Alara] Disconnected');
-    status = 'disconnected';
-
-    // Reject pending requests
-    pending.forEach(({ reject }) => reject(new Error('Connection closed')));
-    pending.clear();
-
-    // Reconnect
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
-      console.log('[Alara] Reconnecting... (attempt ' + reconnectAttempts + ')');
+      console.log('[Alara] Reconnecting in ' + RECONNECT_DELAY + 'ms (attempt ' + reconnectAttempts + ')');
       setTimeout(connect, RECONNECT_DELAY);
     }
   };
 
-  ws.onerror = () => {
-    status = 'error';
+  ws.onerror = (error) => {
+    console.error('[Alara] WebSocket error:', error);
   };
 }
 
-function send(action, payload = {}) {
-  return new Promise((resolve, reject) => {
-    if (status !== 'connected') {
-      reject(new Error('Not connected'));
-      return;
-    }
+// Expose for debugging
+window.__ALARA_WS__ = () => ws;
 
-    const id = generateId();
-    const msg = { action, id, ...payload };
-
-    pending.set(id, { resolve, reject });
-    ws.send(JSON.stringify(msg));
-    console.log('[Alara] →', msg);
-
-    // Timeout after 10s
-    setTimeout(() => {
-      if (pending.has(id)) {
-        pending.delete(id);
-        reject(new Error('Request timeout'));
-      }
-    }, 10000);
-  });
-}
-
-// Expose API
-window.__ALARA__ = {
-  send,
-  ping: () => send('ping'),
-  status: () => status,
-  ws: () => ws,
-};
-
+// Connect on load
 connect();
 `;
 }

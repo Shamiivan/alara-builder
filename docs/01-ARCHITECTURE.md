@@ -175,7 +175,7 @@ alara/
 | **Store slice types** | Colocated with slice | Local import |
 | **Internal utilities** | Colocated with feature | Local import |
 
-### Adding New Features (Open/Closed)
+### Adding New Features 
 
 | To Add... | Create File In... | Register In... |
 |-----------|-------------------|----------------|

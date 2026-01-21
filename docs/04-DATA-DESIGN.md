@@ -93,7 +93,7 @@ Each slice is independent and can be added without modifying other slices.
 ### 2.1 Store Slices (Composition Pattern)
 
 The store uses **slice composition** - each feature is an independent slice that gets composed into the main store. To add new functionality, create a new slice file and add it to the composition.
-
+see [zustand docs] (https://zustand.docs.pmnd.rs/guides/slices-pattern)
 ```typescript
 // apps/builder/src/store/index.ts
 import { create } from 'zustand';
@@ -1071,6 +1071,7 @@ File Change Detected (via Vite HMR)
 ## 4. CSS Data Structures
 
 Representations for CSS Module data. We use a **typed CSS value system** inspired by Webstudio's approach, enabling bidirectional conversion between structured data and CSS strings.
+Types are used for development and debugging purposes.
 
 ### 4.1 Typed CSS Value System
 
@@ -1176,6 +1177,11 @@ export const RgbValueSchema = z.object({
 });
 export type RgbValue = z.infer<typeof RgbValueSchema>;
 
+export const HexValueSchema = z.object({
+  type: z.literal('hex'),
+  value: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/),
+});
+export type HexValue = z.infer<typeof HexValueSchema>;
 // ============================================
 // CSS Variable Reference
 // ============================================
