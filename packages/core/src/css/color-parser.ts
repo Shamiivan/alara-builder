@@ -44,15 +44,17 @@ export function parseColor(input: string): ColorValue | null {
     }
 
     // Get the channels in the appropriate space
+    // Note: colorjs.io may return boxed Number objects, so we convert to primitives
     const coords = color.coords;
     const channels: [number, number, number] = [
-      coords[0] ?? 0,
-      coords[1] ?? 0,
-      coords[2] ?? 0,
+      Number(coords[0] ?? 0),
+      Number(coords[1] ?? 0),
+      Number(coords[2] ?? 0),
     ];
 
     // Get alpha (defaults to 1 if not specified)
-    const alpha = color.alpha ?? 1;
+    // Note: colorjs.io may return boxed Number objects, so we convert to primitive
+    const alpha = Number(color.alpha ?? 1);
 
     return createColorValue(colorSpace, channels, alpha);
   } catch {
