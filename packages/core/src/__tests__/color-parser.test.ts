@@ -14,24 +14,29 @@ describe('color-parser', () => {
       expect(color).not.toBeNull();
       expect(color?.colorSpace).toBe('srgb');
       expect(color?.alpha).toBe(1);
+      expect(color?.channels).toEqual([1, 0, 0]);
     });
 
     it('should parse short hex colors', () => {
       const color = parseColor('#f00');
       expect(color).not.toBeNull();
       expect(color?.colorSpace).toBe('srgb');
+      expect(color?.channels).toEqual([1, 0, 0]);
+      expect(color?.alpha).toBe(1);
     });
 
     it('should parse hex with alpha', () => {
       const color = parseColor('#ff000080');
       expect(color).not.toBeNull();
       expect(color?.alpha).toBeCloseTo(0.5, 1);
+      expect(color?.channels).toEqual([1, 0, 0]);
     });
 
     it('should parse rgb colors', () => {
       const color = parseColor('rgb(255, 0, 0)');
       expect(color).not.toBeNull();
       expect(color?.colorSpace).toBe('srgb');
+      expect(color?.channels).toEqual([1, 0, 0]);
     });
 
     it('should parse rgba colors', () => {
@@ -39,12 +44,14 @@ describe('color-parser', () => {
       expect(color).not.toBeNull();
       if (color) {
         expect(color.alpha).toBeCloseTo(0.5, 1);
+        expect(color.channels).toEqual([1, 0, 0]);
       }
     });
 
     it('should parse hsl colors', () => {
       const color = parseColor('hsl(0, 100%, 50%)');
       expect(color).not.toBeNull();
+      expect(color?.channels).toEqual([0, 100, 50]);
     });
 
     it('should parse hsla colors', () => {
@@ -52,6 +59,7 @@ describe('color-parser', () => {
       expect(color).not.toBeNull();
       if (color) {
         expect(color.alpha).toBeCloseTo(0.5, 1);
+        expect(color.channels).toEqual([0, 100, 50]);
       }
     });
 
@@ -66,6 +74,7 @@ describe('color-parser', () => {
     it('should parse oklch colors', () => {
       const color = parseColor('oklch(0.7 0.15 30)');
       expect(color).not.toBeNull();
+      expect(color?.channels).toEqual([0.7, 0.15, 30]);
     });
 
     it('should return null for invalid colors', () => {
