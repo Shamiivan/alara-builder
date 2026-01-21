@@ -7,9 +7,11 @@
     "dev": "pnpm --filter @alara/cli dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0"
   },

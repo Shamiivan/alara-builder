@@ -20,7 +20,7 @@ afterAll(() => {
 describe('Phase 0 Integration', () => {
   test('server starts and accepts connections', async () => {
     const response = await fetch(`http://localhost:${TEST_PORT}/health`);
-    const data = await response.json();
+    const data = (await response.json()) as { status: string };
 
     expect(response.ok).toBe(true);
     expect(data.status).toBe('ok');

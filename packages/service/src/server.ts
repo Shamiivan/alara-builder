@@ -12,7 +12,7 @@ const CORS_HEADERS = {
 };
 
 export function createServer(config: ServerConfig) {
-  const wsHandler = createWebSocketHandler();
+  const wsHandler = createWebSocketHandler(config.projectDir);
 
   const server = Bun.serve<WebSocketData>({
     port: config.port,
@@ -28,7 +28,7 @@ export function createServer(config: ServerConfig) {
       // WebSocket upgrade
       if (url.pathname === '/ws') {
         const upgraded = server.upgrade(req, {
-          data: { connectedAt: Date.now() },
+          data: { connectedAt: Date.now(), projectDir: config.projectDir },
         });
 
         if (upgraded) {

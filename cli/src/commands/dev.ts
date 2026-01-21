@@ -1,4 +1,5 @@
 import { createServer } from '@alara/service';
+import { resolve } from 'path';
 
 export interface DevOptions {
   port: string;
@@ -7,7 +8,7 @@ export interface DevOptions {
 
 export async function dev(options: DevOptions): Promise<void> {
   const port = parseInt(options.port, 10);
-  const projectDir = options.projectDirectory;
+  const projectDir = resolve(options.projectDirectory);
 
   console.log('Starting Alara dev server...');
   console.log(`  Port: ${port}`);
