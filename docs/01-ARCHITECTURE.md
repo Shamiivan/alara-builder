@@ -24,12 +24,13 @@ alara/
 │       │   ├── components/           # Component types colocated here
 │       │   │   ├── Canvas/
 │       │   │   │   ├── Canvas.tsx    # Centralized event handling
+│       │   │   │   ├── Canvas.test.tsx  # ⬅ Unit tests colocated
 │       │   │   │   ├── overlays/     # Selection, Hover, Resize overlays
 │       │   │   │   └── types.ts
 │       │   │   ├── FloatingToolbox/
 │       │   │   ├── Toolbar/
 │       │   │   └── ...
-│       │   ├── behaviors/            # ⬅ EDITOR BEHAVIORS 
+│       │   ├── behaviors/            # ⬅ EDITOR BEHAVIORS
 │       │   │   ├── registry.ts       #   EditorBehaviorsRegistry defined here
 │       │   │   └── handlers/         #   Add new behaviors here
 │       │   │       ├── index.ts      #   Auto-imports all behaviors
@@ -38,18 +39,28 @@ alara/
 │       │   │       └── ...
 │       │   ├── store/
 │       │   │   ├── index.ts          # Composes slices (add new slices here)
+│       │   │   ├── editorStore.test.ts  # ⬅ Store tests
 │       │   │   └── slices/           # Each slice has its own types
 │       │   │       ├── selection.ts  # SelectionSlice type defined here
 │       │   │       ├── editing.ts
 │       │   │       ├── history.ts
 │       │   │       └── ...
 │       │   └── hooks/
+│       ├── test/                     
+│       │   ├── setup-dom.ts          
+│       │   ├── mocks/                
+│       │   └── fixtures/             
 │       ├── package.json
 │       └── vite.config.ts
 │
 ├── packages/
-│   ├── core/                         # Business logic + shared types
+│   ├── core/                         
 │   │   ├── src/
+│   │   │   ├── __tests__/            
+│   │   │   │   ├── css-values.test.ts
+│   │   │   │   ├── parser.test.ts
+│   │   │   │   └── ...
+│   │   │   │
 │   │   │   ├── shared/               # ═══ SHARED CONTRACTS  ═══
 │   │   │   │   ├── css-values.ts     # StyleValue types + Zod schemas + parsers
 │   │   │   │   ├── messages.ts       # WebSocket message types + schemas
@@ -59,9 +70,11 @@ alara/
 │   │   │   │
 │   │   │   ├── transforms/           # Transform types colocated with handlers
 │   │   │   │   ├── registry.ts       # TransformHandler interface defined here
+│   │   │   │   ├── registry.test.ts  # ⬅ Registry tests
 │   │   │   │   └── handlers/         # ⬅ BUSINESS LOGIC: Pure AST manipulation (CSS/JSX)
 │   │   │   │       ├── index.ts      #   Framework-agnostic, no HTTP knowledge
 │   │   │   │       ├── css-update.ts #   Defines WHAT transforms do
+│   │   │   │       ├── css-update.test.ts  # ⬅ Handler tests colocated
 │   │   │   │       ├── css-add.ts
 │   │   │   │       ├── text-update.ts
 │   │   │   │       └── ...
@@ -82,6 +95,7 @@ alara/
 │   │   │   │   ├── router.ts         # Route types colocated
 │   │   │   │   └── handlers/         # ⬅ HTTP ROUTING: Request/response handling
 │   │   │   │       ├── transform.ts  #   Validates input, calls core handlers, formats responses
+│   │   │   │       ├── transform.test.ts  # ⬅ Handler tests colocated
 │   │   │   │       ├── preview.ts    #   Defines HOW service exposes functionality
 │   │   │   │       └── ...
 │   │   │   ├── ws/
@@ -91,6 +105,16 @@ alara/
 │   │   │   ├── watcher/
 │   │   │   │   └── FileWatcher.ts
 │   │   │   └── static/
+│   │   ├── test/                     # ⬅ TEST INFRASTRUCTURE
+│   │   │   ├── setup.ts              #   Test setup/globals
+│   │   │   ├── fixtures/             #   CSS/JSX fixture files
+│   │   │   │   ├── css/
+│   │   │   │   └── jsx/
+│   │   │   ├── mocks/                #   WebSocket, filesystem mocks
+│   │   │   ├── helpers.ts            #   Test helper functions
+│   │   │   └── integration/          #   Integration tests
+│   │   │       ├── transform-flow.test.ts
+│   │   │       └── ws-protocol.test.ts
 │   │   └── package.json
 │   │
 │   ├── buildtime/                      # Injected into user's app
@@ -124,14 +148,25 @@ alara/
 │       └── eslint/
 │           └── preset.js
 │
-└── cli/                              # CLI entry point (bunx alara)
-    ├── src/
-    │   ├── index.ts
-    │   └── commands/
-    │       ├── dev.ts
-    │       ├── build.ts
-    │       └── init.ts
-    └── package.json
+├── cli/                              # CLI entry point (bunx alara)
+│   ├── src/
+│   │   ├── index.ts
+│   │   └── commands/
+│   │       ├── dev.ts
+│   │       ├── build.ts
+│   │       └── init.ts
+│   └── package.json
+│
+└── e2e/                              # ⬅ END-TO-END TESTS (Playwright)
+    ├── fixtures/
+    │   └── test-project/             #   Sample React project for tests
+    │       ├── src/components/
+    │       ├── package.json
+    │       └── vite.config.ts
+    ├── visual-editing.spec.ts        #   Selection, hover, property editing
+    ├── undo-redo.spec.ts             #   Undo/redo workflows
+    ├── variant-creation.spec.ts      #   Creating CSS variants
+    └── external-changes.spec.ts      #   File changes via IDE/git
 ```
 
 ### Package Dependency Graph
@@ -175,7 +210,7 @@ alara/
 | **Store slice types** | Colocated with slice | Local import |
 | **Internal utilities** | Colocated with feature | Local import |
 
-### Adding New Features 
+### Adding New Features
 
 | To Add... | Create File In... | Register In... |
 |-----------|-------------------|----------------|
@@ -186,6 +221,23 @@ alara/
 | New store slice | `apps/builder/src/store/slices/` | `store/index.ts` (compose) |
 | New API endpoint | `packages/service/src/api/handlers/` | Route registry |
 | New shared type | `packages/core/src/shared/` | Export from `index.ts` |
+
+### Test File Locations
+
+Tests live in **their own files**, not in documentation. Test files are colocated with the code they test.
+
+| Test Type | Location | Naming Convention |
+|-----------|----------|-------------------|
+| **Unit tests** (colocated) | Next to source file | `*.test.ts` / `*.test.tsx` |
+| **Unit tests** (grouped) | `packages/*/src/__tests__/` | `*.test.ts` |
+| **Integration tests** | `packages/service/test/integration/` | `*-flow.test.ts` |
+| **E2E tests** | `e2e/` | `*.spec.ts` |
+| **Test fixtures** | `packages/*/test/fixtures/` | CSS/JSX files |
+| **Test mocks** | `packages/*/test/mocks/` | `*.ts` |
+| **Test helpers** | `packages/*/test/helpers.ts` | Single file |
+
+> **Note**: For testing strategy and rationale, see [09-TESTING.md](./09-TESTING.md).
+> For test interface definitions, see [03-INTERFACES.md](./03-INTERFACES.md#8-testing-interfaces).
 
 ## System Diagram
 

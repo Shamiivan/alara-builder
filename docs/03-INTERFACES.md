@@ -19,6 +19,7 @@ This document defines all API contracts, message formats, and TypeScript interfa
 5. [Store Interfaces](#5-store-interfaces)
 6. [Component Props Interfaces](#6-component-props-interfaces)
 7. [Error Codes](#7-error-codes)
+8. [Testing Interfaces](#8-testing-interfaces)
 
 ---
 
@@ -1634,4 +1635,348 @@ wsClient.send(JSON.stringify({ action: 'transform', ...request }));
 // 6. Server updates JSX: className={styles.button} → className={`${styles.button} ${styles.large}`}
 // 7. Both files written atomically
 // 8. Vite HMR updates both CSS and JSX
+```
+
+---
+
+## 8. Testing Interfaces
+
+TypeScript interfaces for testing infrastructure, mocks, fixtures, and test helpers.
+
+> **Important**: Test implementations live in **their own files**, not in documentation.
+> - For test file locations, see [01-ARCHITECTURE.md](./01-ARCHITECTURE.md#test-file-locations)
+> - For testing strategy and rationale, see [09-TESTING.md](./09-TESTING.md)
+
+### 8.1 Test Context
+
+```typescript
+/**
+ * Context object passed to transform handlers during testing.
+ * Provides mocked dependencies for isolated unit tests.
+ */
+interface TransformContext {
+  /** Project root directory (mocked path for tests) */
+  projectDir: string;
+
+  /** CSS AST cache for parsed stylesheets */
+  cssCache: CSSCache;
+
+  /** ts-morph Project for JSX manipulation */
+  project: Project;
+
+  /** Transaction for atomic file operations */
+  transaction: Transaction;
+}
+
+/**
+ * Create a TransformContext with test defaults.
+ * Uses in-memory file system for isolation.
+ */
+function createTestContext(): TransformContext;
+```
+
+### 8.2 Mock WebSocket
+
+```typescript
+/**
+ * Mock WebSocket for testing client-side code without a real server.
+ */
+interface MockWebSocket {
+  // Standard WebSocket methods
+  send: jest.Mock<void, [string]>;
+  close: jest.Mock<void, []>;
+  addEventListener: jest.Mock<void, [string, Function]>;
+  removeEventListener: jest.Mock<void, [string, Function]>;
+
+  // Test simulation methods
+  simulateMessage: (data: object) => void;
+  simulateOpen: () => void;
+  simulateClose: () => void;
+  simulateError: (error: Error) => void;
+
+  // Test inspection methods
+  getSentMessages: () => string[];
+  getLastSentMessage: () => string | undefined;
+  clearSentMessages: () => void;
+
+  // WebSocket constants
+  readyState: number;
+  CONNECTING: 0;
+  OPEN: 1;
+  CLOSING: 2;
+  CLOSED: 3;
+}
+
+/**
+ * Create a mock WebSocket instance for testing.
+ */
+function createMockWebSocket(): MockWebSocket;
+```
+
+### 8.3 WebSocket Test Client
+
+```typescript
+/**
+ * Test client for WebSocket protocol integration tests.
+ * Provides Promise-based request/response pattern.
+ */
+interface TestWSClient {
+  /** Connect to WebSocket server */
+  connect(url?: string): Promise<void>;
+
+  /**
+   * Send a message and wait for response.
+   * @param action - WebSocket action (e.g., 'transform', 'ping')
+   * @param payload - Additional message payload
+   * @param timeout - Response timeout in ms (default 5000)
+   */
+  send<T>(action: string, payload?: object, timeout?: number): Promise<T>;
+
+  /** Close the connection */
+  close(): void;
+}
+```
+
+### 8.4 Test Fixtures
+
+```typescript
+/**
+ * CSS fixture file paths (relative to fixtures directory).
+ */
+type CSSFixture =
+  | 'css/button.module.css'      // Standard button with variants
+  | 'css/with-variables.module.css'  // Uses CSS custom properties
+  | 'css/malformed.css';         // Intentional syntax errors
+
+/**
+ * JSX fixture file paths (relative to fixtures directory).
+ */
+type JSXFixture =
+  | 'jsx/Button.tsx'             // Simple component with CSS Module
+  | 'jsx/WithVariants.tsx'       // Multiple className classes
+  | 'jsx/ComplexComponent.tsx';  // Nested elements, props, etc.
+
+/**
+ * Read a fixture file's contents.
+ * @param path - Fixture path relative to fixtures directory
+ */
+function readFixture(path: CSSFixture | JSXFixture | string): string;
+```
+
+### 8.5 Test Helper Functions
+
+```typescript
+/**
+ * Create a mock ElementTarget for testing.
+ * @param overrides - Override default values
+ */
+function createElementTarget(overrides?: Partial<ElementTarget>): ElementTarget;
+
+/**
+ * Create a mock DOM element with oid and css attributes.
+ * @param tag - HTML tag name (default: 'button')
+ */
+function createMockDOMElement(tag?: string): HTMLElement;
+
+/**
+ * Wait for an async condition to become true.
+ * @param condition - Function that returns boolean or Promise<boolean>
+ * @param timeout - Maximum wait time in ms (default 5000)
+ * @param interval - Polling interval in ms (default 100)
+ * @throws Error if condition not met within timeout
+ */
+function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  timeout?: number,
+  interval?: number
+): Promise<void>;
+
+/**
+ * Create a test project directory with files.
+ * @param files - Map of relative paths to file contents
+ * @returns Absolute path to created directory
+ */
+function createTestProject(files: Record<string, string>): Promise<string>;
+
+/**
+ * Clean up a test project directory.
+ * @param projectDir - Path from createTestProject
+ */
+function cleanupTestProject(projectDir: string): Promise<void>;
+```
+
+### 8.6 Playwright Test Fixtures
+
+```typescript
+/**
+ * Custom Playwright test fixtures for Alara E2E tests.
+ */
+interface AlaraTestFixtures {
+  /**
+   * Select an element by its oid attribute.
+   * Waits for selection overlay to appear.
+   */
+  selectElement: (oid: string) => Promise<void>;
+
+  /**
+   * Get the currently selected element's target info.
+   */
+  getSelectedTarget: () => Promise<ElementTarget | null>;
+
+  /**
+   * Wait for a transform to complete.
+   * @param requestId - Transform request ID
+   */
+  waitForTransform: (requestId: string) => Promise<TransformResultMessage>;
+
+  /**
+   * Modify a file and wait for HMR update.
+   * @param filePath - Project-relative file path
+   * @param content - New file content
+   */
+  modifyFileAndWaitForHMR: (filePath: string, content: string) => Promise<void>;
+}
+
+// Usage with Playwright's test.extend
+import { test as base, expect } from '@playwright/test';
+
+export const test = base.extend<AlaraTestFixtures>({
+  selectElement: async ({ page }, use) => { /* implementation */ },
+  getSelectedTarget: async ({ page }, use) => { /* implementation */ },
+  waitForTransform: async ({ page }, use) => { /* implementation */ },
+  modifyFileAndWaitForHMR: async ({ page }, use) => { /* implementation */ },
+});
+```
+
+### 8.7 Mock Store State
+
+```typescript
+/**
+ * Factory for creating mock EditorStore state.
+ */
+interface MockStoreFactory {
+  /**
+   * Create store state with selected element.
+   */
+  withSelectedElement(element: HTMLElement, target: ElementTarget): Partial<EditorState>;
+
+  /**
+   * Create store state with pending edits.
+   */
+  withPendingEdits(edits: PendingEdit[]): Partial<EditorState>;
+
+  /**
+   * Create store state with undo/redo history.
+   */
+  withHistory(undoStack: Command[], redoStack?: Command[]): Partial<EditorState>;
+
+  /**
+   * Create store state with WebSocket connected.
+   */
+  withConnection(wsClient: MockWebSocket): Partial<EditorState>;
+}
+
+/**
+ * Reset store to initial state between tests.
+ */
+function resetEditorStore(): void;
+```
+
+### 8.8 CSS Cache Mock
+
+```typescript
+/**
+ * Mock CSSCache for testing transform handlers.
+ */
+interface MockCSSCache {
+  /** Store parsed CSS AST */
+  set(path: string, ast: postcss.Root): Promise<void>;
+
+  /** Retrieve parsed CSS AST */
+  get(path: string): Promise<postcss.Root | undefined>;
+
+  /** Check if path is cached */
+  has(path: string): boolean;
+
+  /** Invalidate cached entry */
+  invalidate(path: string): void;
+
+  /** Clear all cached entries */
+  clear(): void;
+
+  /** Get all cached paths (for testing) */
+  getCachedPaths(): string[];
+}
+```
+
+### 8.9 Transaction Mock
+
+```typescript
+/**
+ * Mock Transaction for testing file operations.
+ */
+interface MockTransaction {
+  /** Queue a file write */
+  queueWrite(path: string, content: string): void;
+
+  /** Get queued content for a file */
+  getQueuedWrite(path: string): string | undefined;
+
+  /** Get all queued file paths */
+  getQueuedPaths(): string[];
+
+  /** Store backup for rollback */
+  backup(path: string, property: string, value: string): void;
+
+  /** Commit all queued writes (mock: just clears queue) */
+  commit(): Promise<void>;
+
+  /** Rollback to backups (mock: just clears state) */
+  rollback(): Promise<void>;
+
+  /** Check if any writes are queued */
+  hasQueuedWrites(): boolean;
+}
+```
+
+### 8.10 Test Assertions
+
+```typescript
+/**
+ * Custom assertions for Alara tests.
+ */
+interface AlaraAssertions {
+  /**
+   * Assert CSS file contains declaration.
+   */
+  toContainCSSDeclaration(
+    cssContent: string,
+    selector: string,
+    property: string,
+    value: string
+  ): void;
+
+  /**
+   * Assert JSX file contains className.
+   */
+  toContainClassName(
+    jsxContent: string,
+    className: string
+  ): void;
+
+  /**
+   * Assert transform result is successful.
+   */
+  toBeSuccessfulTransform(
+    result: TransformResultMessage
+  ): void;
+
+  /**
+   * Assert transform result failed with error code.
+   */
+  toFailWithCode(
+    result: TransformResultMessage,
+    code: ErrorCode
+  ): void;
+}
 ```

@@ -1,171 +1,337 @@
 # 10 - Implementation Plan
 
-Breakdown for maximum extendability using Accelerate principles: deploy fast, test often, small batches.
+Vertical slice approach: each phase delivers a working feature end-to-end (UI → Server → File).
 
 ---
 
-## Phase 0: Walking Skeleton
+## Current Status
 
-Validate integration early: CLI → Vite plugin → Bun server → client runtime round-trip.
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 0: Walking Skeleton | Complete | CLI, Vite plugin shell, Bun server, client runtime, integration test |
+| Phase 1: Type Foundation | Complete | Zod schemas, CSS parser, color parser, value serializer |
+| Phase 2+ | In progress| Vertical slices below |
+
+---
+
+## Phase 2: Text Editing (First Vertical Slice)
+
 
 | Slice | Description |
 |-------|-------------|
-| **0.1 CLI Entry** | Commander.js setup with `alara dev` command (stub that starts server) |
-| **0.2 Vite Plugin Shell** | Plugin entry point, dev-only no-op transform, client script injection |
-| **0.3 Bun Server Shell** | Bun.serve() with WebSocket upgrade, echo messages back |
-bunx alara dev
-| **0.4 Client Runtime** | Injected script that connects to WebSocket, logs connection status |
-| **0.5 Integration Smoke Test** | E2E test: `alara dev` starts → client connects → message round-trips |
+| **2.1 Babel Plugin (oid only)** | Inject `oid="{file}:{line}:{col}"` attribute on JSX elements. Use @rollup/plugin-babel in Vite. |
+| **2.2 JSX Transformer** | ts-morph utilities: `findElementAt(file, line, col)`, `updateTextContent(element, text)` |
+| **2.3 Selection System** | Click detection on elements with `oid`, parse attribute, store in Zustand |
+| **2.4 Selection Overlay** | Blue outline positioned via `getBoundingClientRect()` on selected element |
+| **2.5 Text Edit Behavior** | Double-click → `contentEditable=true`, commit on Enter/blur |
+| **2.6 Server: text-update** | WebSocket handler: receive `{type: 'text-update', oid, text}`, call JSX transformer |
+| **2.7 E2E Test** | Double-click text → edit → blur → file changes → Vite HMR updates DOM |
+
+**Infrastructure built:**
+- Babel plugin foundation (extend for `css` attribute later)
+- Vite plugin + Babel integration
+- WebSocket message routing
+- Selection state (Zustand)
+- Editor behavior pattern
+- ts-morph utilities
+- Transform handler pattern
 
 ---
 
-## Phase 1: Type Foundation
+## Phase 3: CSS Editing - Spacing
+
+Build on Phase 2 infrastructure, add CSS Module support.
 
 | Slice | Description |
 |-------|-------------|
-| **1.1 Zod Schemas** | StyleValue discriminated union, ElementTarget, transform request/response schemas |
-| **1.2 CSS Value Parser** | css-tree tokenization → StyleValue types (unit, keyword, number, tuple) |
-| **1.3 Color Parser** | colorjs.io integration for hex/rgb/hsl/oklch parsing and conversion |
-| **1.4 PostCSS Utilities** | findRule, getDeclaration, setDeclaration, parseRuleStyles helpers |
-| **1.5 Value Serializer** | toValue() - convert StyleValue back to CSS string |
+| **3.1 Babel Plugin (css attribute)** | Extend plugin: trace `className={styles.X}` → import → add `css="{cssFile}:{selectors}"` |
+| **3.2 Toolbox Shell** | Floating UI container, positioned near selected element |
+| **3.3 Spacing Panel** | Padding/margin inputs using existing `@alara/core` PostCSS utilities |
+| **3.4 Server: css-update** | WebSocket handler: receive `{type: 'css-update', css, property, value}`, update CSS file |
+| **3.5 E2E Test** | Select element → change padding in toolbox → file changes → HMR updates |
+
+**Infrastructure built:**
+- CSS Module resolution in Babel plugin
+- Toolbox foundation
+- Panel plugin pattern
+- css-update transform handler
 
 ---
 
-## Phase 2: AST Infrastructure
+## Phase 4: CSS Editing - Colors
 
 | Slice | Description |
 |-------|-------------|
-| **2.1 CSS Cache** | LRU cache for PostCSS ASTs (50MB/100 entry limit, mtime invalidation) |
-| **2.2 Transaction System** | Atomic file writes with backup/rollback on failure |
-| **2.3 JSX Transformer** | ts-morph utilities: findElementAt, addClassName, updateText |
-| **2.4 Babel Plugin** | Build-time injection of `oid` + `css` attributes (self-contained, no registry) + CSS Module resolution |
-| **2.5 Vite Plugin Enhancement** | Integrate Babel plugin, connect to Bun server |
+| **4.1 Color Picker Component** | HSL/hex input, uses existing `@alara/core` color parser |
+| **4.2 Colors Panel** | Background, text color, border color inputs |
+| **4.3 CSS Variable Hint** | Show "from var(--color-primary)" when value uses variable |
+| **4.4 E2E Test** | Select element → change color → file changes → HMR updates |
 
 ---
 
-## Phase 3: Transform Engine
+## Phase 5: CSS Editing - Typography
 
 | Slice | Description |
 |-------|-------------|
-| **3.1 Transform Registry** | Handler registration, Zod validation, dispatch by type |
-| **3.2 TransformEngine** | Orchestrator: creates context, delegates to registry, manages transaction |
-| **3.3 css-update Handler** | Update existing CSS property value |
-| **3.4 css-add Handler** | Add new CSS property to rule |
-| **3.5 css-remove Handler** | Remove CSS property from rule |
-| **3.6 text-update Handler** | Replace JSX text content |
+| **5.1 Typography Panel** | Font-size, font-weight, line-height, font-family |
+| **5.2 Unit Selector** | Toggle between px/rem/em for size values |
+| **5.3 E2E Test** | Select text → change font-size → file changes → HMR updates |
 
 ---
 
-## Phase 4: Variant System
+## Phase 6: CSS Editing - Borders & Effects
 
 | Slice | Description |
 |-------|-------------|
-| **4.1 add-variant Handler** | Create new CSS class + update JSX className (multi-file) |
-| **4.2 apply-variant Handler** | Add existing variant class to element's className |
-| **4.3 remove-variant Handler** | Remove variant class from element's className |
-| **4.4 get-variants API** | Parse CSS file, return all class selectors as variants |
+| **6.1 Border Panel** | Border width/style/color, border-radius (corners) |
+| **6.2 Effects Panel** | Box-shadow, opacity |
+| **6.3 css-add Handler** | Add new CSS property that doesn't exist in rule |
+| **6.4 css-remove Handler** | Remove CSS property from rule |
 
 ---
 
-## Phase 5: Server Actions
+## Phase 7: Variants
 
-Build on the Bun server shell from Phase 0 with real message handlers.
+Multi-file edits: CSS + JSX in single transaction.
 
 | Slice | Description |
 |-------|-------------|
-| **5.1 Message Router** | Action dispatch, request/response correlation, error handling |
-| **5.2 transform Action** | Validate request (includes computedValue from client), resolve CSS location, execute transform |
-| **5.3 get-variants Action** | Parse CSS file, return available variants for component |
-| **5.4 get-project Action** | Scan src/, return component list with CSS Module paths |
-| **5.5 preview Action** | Dry-run transform, return before/after diff |
-| **5.6 FileWatcher** | Bun.watch() with debounce, cache invalidation on external changes |
+| **7.1 Transaction System** | Atomic multi-file writes with backup/rollback |
+| **7.2 add-variant Handler** | Create new CSS class + update JSX className |
+| **7.3 apply-variant Handler** | Add existing variant class to element |
+| **7.4 remove-variant Handler** | Remove variant class from element |
+| **7.5 Variant Picker UI** | Show available classes from CSS file, allow selection |
 
 ---
 
-## Phase 6: Frontend Foundation
-
-Build on the client runtime from Phase 0 with state management and canvas.
+## Phase 8: Undo/Redo
 
 | Slice | Description |
 |-------|-------------|
-| **6.1 Zustand Store** | Selection, hover, pending edits, undo/redo stacks |
-| **6.2 WebSocket Hook** | Reconnect logic, request/response correlation, connection status |
-| **6.3 Vite HMR Hook** | Listen for file changes, clear pending edits, refresh selection |
-| **6.4 Canvas Component** | Centralized click/hover/keyboard handling, event delegation |
-| **6.5 Selection Overlay** | Blue outline positioned via element bounds |
-| **6.6 Hover Overlay** | Light highlight on mouseover |
+| **8.1 Command Pattern** | `Command` interface with `execute()` and `undo()` |
+| **8.2 Undo Stack** | Push on edit, pop on Ctrl+Z, apply reverse transform |
+| **8.3 Redo Stack** | Push on undo, clear on new edit, Ctrl+Shift+Z |
+| **8.4 HMR Integration** | Clear undo/redo for file when external change detected |
+| **8.5 Error Recovery** | Transaction rollback UI, retry prompts |
 
 ---
 
-## Phase 7: Editor Behaviors
+## Phase 9: Polish & Production
 
 | Slice | Description |
 |-------|-------------|
-| **7.1 Behaviors Registry** | EditorBehavior interface, appliesTo detection, event delegation |
-| **7.2 Select Behavior** | Single click → select element, show toolbox |
-| **7.3 Text Edit Behavior** | Double click → contentEditable, commit on Enter/blur |
-| **7.4 Resize Behavior** | Drag handles → update width/height (future) |
+| **9.1 init Command** | `alara init` - detect project type, install runtime, update vite.config |
+| **9.2 dev Command Polish** | Validate project structure, graceful shutdown, helpful errors |
+| **9.3 Production Build** | Strip `oid` and `css` attributes in production |
+| **9.4 FileWatcher** | Bun.watch() with debounce, notify client of external changes |
+| **9.5 CSS Cache (if needed)** | LRU cache for PostCSS ASTs - add only if profiling shows need |
 
 ---
 
-## Phase 8: Floating Toolbox
+## Testing Strategy
 
-| Slice | Description |
-|-------|-------------|
-| **8.1 Toolbox Shell** | Floating UI positioning, tab bar, content area |
-| **8.2 Tab Registry** | Register panels by ID, element-type filtering |
-| **8.3 Spacing Panel** | Margin/padding inputs, BoxSides parsing, linked toggle |
-| **8.4 Colors Panel** | Color picker, format selector, CSS variable hint |
-| **8.5 Typography Panel** | Font-size, font-weight, line-height, font-family |
-| **8.6 Border Panel** | Border width/style/color, border-radius corners |
-| **8.7 Effects Panel** | Box-shadow, opacity, cursor |
+Each phase includes E2E tests validating the full vertical slice. See [09-TESTING.md](./09-TESTING.md) for detailed test specifications.
+
+### Test Stack
+
+| Tool | Purpose |
+|------|---------|
+| **Bun Test** | Unit & integration tests (`bun:test`) |
+| **Playwright** | E2E browser tests (`@playwright/test`) |
+
+### Playwright Configuration
+
+```typescript
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 30_000,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+  ],
+  webServer: {
+    command: 'pnpm dev',
+    url: 'http://localhost:5173',
+    timeout: 120_000,
+    reuseExistingServer: !process.env.CI,
+  },
+});
+```
+
+### Test Coverage by Phase
+
+| Phase | Unit Tests | E2E Tests | Key Test Cases |
+|-------|------------|-----------|----------------|
+| 2 (Text) | 20+ | 3 | `oid` injection, selection overlay, text edit → file update |
+| 3 (Spacing) | 15+ | 2 | `css` injection, toolbox appears, padding change → CSS update |
+| 4 (Colors) | 10+ | 2 | Color picker, hex/hsl input, color change → CSS update |
+| 5 (Typography) | 10+ | 1 | Font inputs, unit selector, typography change → CSS update |
+| 6 (Borders) | 15+ | 2 | Border panel, css-add handler, border change → CSS update |
+| 7 (Variants) | 20+ | 3 | Transaction rollback, variant create → CSS+JSX update |
+| 8 (Undo/Redo) | 15+ | 3 | Ctrl+Z reverts, Ctrl+Shift+Z redoes, external change clears stack |
+| 9 (Polish) | 10+ | 2 | `alara init` works, production build strips attributes |
+
+### E2E Test Examples
+
+#### Phase 2: Text Editing
+
+```typescript
+// e2e/phase2-text-editing.spec.ts
+import { test, expect } from '@playwright/test';
+import { readFile } from 'fs/promises';
+
+test('edit text updates source file', async ({ page }) => {
+  await page.goto('/');
+
+  // Double-click to edit text
+  const element = page.locator('[oid]:has-text("Click me")').first();
+  await element.dblclick();
+
+  // Type new text
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('New Text');
+  await page.keyboard.press('Enter');
+
+  // Wait for HMR
+  await page.waitForTimeout(1000);
+
+  // Verify DOM updated
+  await expect(element).toHaveText('New Text');
+
+  // Verify file updated
+  const oid = await element.getAttribute('oid');
+  const [file] = oid!.split(':');
+  const content = await readFile(file, 'utf-8');
+  expect(content).toContain('New Text');
+});
+```
+
+#### Phase 3: CSS Spacing
+
+```typescript
+// e2e/phase3-css-spacing.spec.ts
+test('change padding updates CSS file', async ({ page }) => {
+  await page.goto('/');
+
+  // Select element
+  const element = page.locator('[oid][css]').first();
+  await element.click();
+
+  // Change padding in toolbox
+  const input = page.getByTestId('spacing-padding-top');
+  await input.clear();
+  await input.fill('24px');
+  await input.press('Enter');
+
+  // Wait for HMR
+  await page.waitForTimeout(1000);
+
+  // Verify computed style
+  const padding = await element.evaluate(
+    el => getComputedStyle(el).paddingTop
+  );
+  expect(padding).toBe('24px');
+});
+```
 
 ---
 
-## Phase 9: Undo/Redo + Polish
-
-| Slice | Description |
-|-------|-------------|
-| **9.1 Command Pattern** | Command interface, StyleCommand, TextCommand, VariantCommand |
-| **9.2 Undo Stack** | Push on edit, pop on Ctrl+Z, max size limit |
-| **9.3 Redo Stack** | Push on undo, clear on new edit, Ctrl+Shift+Z |
-| **9.4 External Change Handling** | Clear undo/redo for file when Vite HMR fires |
-| **9.5 Error Recovery** | Transaction rollback UI, retry prompts, error toasts |
-
----
-
-## Phase 10: CLI Polish + Production
-
-Build on CLI shell from Phase 0 with init command and production build.
-
-| Slice | Description |
-|-------|-------------|
-| **10.1 init Command** | Detect project type, install runtime, update vite.config |
-| **10.2 dev Command Polish** | Validate project structure, open browser, graceful shutdown |
-| **10.3 Build Integration** | Production build strips `oid` and `css` attributes |
-| **10.4 Error Messages** | Helpful CLI errors for common misconfigurations |
-
----
-
-## Testing Milestones
-
-| Phase | Unit Tests | Integration | E2E |
-|-------|-----------|-------------|-----|
-| 0 | 5+ | 1 | 1 (smoke test) |
-| 1-2 | 50+ | 5 | 1 |
-| 3-4 | 80+ | 15 | 3 |
-| 5-6 | 100+ | 25 | 5 |
-| 7-8 | 130+ | 35 | 10 |
-| 9-10 | 150+ | 40 | 15 |
-
----
-
-## Key Extensibility Checkpoints
+## Vertical Slice Checklist
 
 After each phase, verify:
 
-1. Can add new transform without modifying TransformEngine?
-2. Can add new panel without modifying FloatingToolbox?
-3. Can add new StyleValue type via module augmentation?
-4. Can add new behavior without modifying Canvas?
-5. Full test suite runs in <3 minutes?
+1. ✅ Feature works end-to-end (UI → Server → File → HMR)
+2. ✅ E2E test passes
+3. ✅ No regressions in previous phases
+4. ✅ Can demo the feature to stakeholders
+
+---
+
+## Key Technical Decisions
+
+### Babel Plugin via @rollup/plugin-babel
+
+```typescript
+// vite.config.ts
+import { babel } from '@rollup/plugin-babel'
+
+export default defineConfig({
+  plugins: [
+    babel({
+      plugins: ['@alara/babel-plugin'],
+      extensions: ['.tsx', '.jsx'],
+    }),
+  ],
+})
+```
+
+### ts-morph for JSX Manipulation
+
+```typescript
+// Find element and update text
+const sourceFile = project.getSourceFile(filePath);
+const element = findElementAt(sourceFile, line, col);
+element.getFirstChildByKind(SyntaxKind.JsxText)?.replaceWithText(newText);
+await sourceFile.save();
+```
+
+### WebSocket Message Flow
+
+```
+Client                          Server
+  │                                │
+  │  {type:'text-update',          │
+  │   oid:'src/App.tsx:12:4',      │
+  │   text:'New Text'}             │
+  │  ─────────────────────────────►│
+  │                                │ ts-morph: find element, update text
+  │                                │ write file
+  │                                │
+  │  {status:'ok', requestId}      │
+  │  ◄─────────────────────────────│
+  │                                │
+  │  [Vite HMR updates DOM]        │
+  │                                │
+```
+
+### Selection State (Zustand)
+
+```typescript
+interface SelectionSlice {
+  selectedOid: string | null;
+  selectedCss: string | null;
+  select: (oid: string, css: string | null) => void;
+  deselect: () => void;
+}
+```
+
+---
+
+## Dependencies by Phase
+
+| Phase | New Dependencies |
+|-------|------------------|
+| 2 | @rollup/plugin-babel, @babel/core, ts-morph |
+| 3 | @floating-ui/react |
+| 4 | (uses existing colorjs.io) |
+| 7 | (no new deps - uses existing PostCSS) |
+
+---
+
+## Risk Mitigation
+
+| Risk | Mitigation |
+|------|------------|
+| Babel plugin complexity | Start with `oid` only, add `css` in Phase 3 |
+| ts-morph learning curve | Well-documented, 790 code snippets in Context7 |
+| Multi-file atomicity | Defer transaction system to Phase 7 (variants) |
+| Performance | Event-driven access, no caching needed initially |
