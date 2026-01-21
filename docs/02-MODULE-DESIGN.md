@@ -1037,291 +1037,99 @@ export function createWebSocketHandler(engine: TransformEngine) {
 
 ---
 
-## 3. Builder Package (`@alara/builder`)
+## 3. Client Package (`@alara/client`)
 
-React application for the visual editor UI.
+Vanilla JavaScript/TypeScript package injected into the user's running app. Provides selection, text editing, overlays, and WebSocket connection to the Alara service. **No React dependency**.
 
-### 3.1 Module: `store/editorStore.ts`
+### 3.1 Module: `store.ts`
 
-Central Zustand store. Inspired by Onlook's manager pattern but simpler.
-Uses **Typed CSS Values** for all style operations.
-
-**Types**: See [03-INTERFACES.md](./03-INTERFACES.md#5-store-interfaces) for:
-- `EditorState`, `EditorActions` - Store shape and actions
-- `ElementTarget`, `SelectedElement`, `HoveredElement` - Selection types
-- `PendingEdit`, `Command`, `CommandType` - Edit tracking types
+Vanilla Zustand store (no React hooks). Uses `createStore` from `zustand/vanilla`.
 
 ```typescript
-import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
-import {
-  StyleValue,
-  toValue,
-  parseCssValue,
-} from '@alara/core/shared';
-import type {
-  EditorState,
-  EditorActions,
-  ElementTarget,
-  PendingEdit,
-  Command,
-  ExternalChange,
-} from '@alara/core/shared';
+// packages/client/src/store.ts
+import { createStore } from 'zustand/vanilla';
+import type { ElementTarget } from '@alara/core/shared';
 
-// --- Store Implementation ---
+export interface SelectedElement {
+  element: HTMLElement;
+  target: ElementTarget | null;
+  bounds: DOMRect;
+}
 
-export const useEditorStore = create<EditorState & EditorActions>()(
-  subscribeWithSelector((set, get) => ({
+export interface TextEditState {
+  isEditing: boolean;
+  element: HTMLElement | null;
+  originalText: string;
+  oid: string;
+}
+
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface EditorState {
+  connectionStatus: ConnectionStatus;
+  connectionError: string | null;
+  wsClient: WebSocket | null;
+  selectedElement: SelectedElement | null;
+  hoveredElement: { element: HTMLElement; bounds: DOMRect } | null;
+  textEdit: TextEditState;
+  pendingEdits: Map<string, PendingEdit>;
+}
+
+export function createEditorStore() {
+  return createStore<EditorState & EditorActions>((set, get) => ({
     // Initial state
-    wsConnected: false,
+    connectionStatus: 'disconnected',
+    connectionError: null,
     wsClient: null,
     selectedElement: null,
     hoveredElement: null,
-    isTextEditing: false,
-    textEditingTarget: null,
+    textEdit: { isEditing: false, element: null, originalText: '', oid: '' },
     pendingEdits: new Map(),
-    undoStack: [],
-    redoStack: [],
-    maxStackSize: 100,
-    activeToolboxTab: 'spacing' as ToolboxTabId | null,  // Default tab when element selected
-    deviceMode: 'desktop',
-    zoom: 100,
-    previewMode: false,
 
-    // --- Actions ---
-
-    connect(url: string) {
-      const ws = new WebSocket(url);
-
-      ws.onopen = () => set({ wsConnected: true, wsClient: ws });
-      ws.onclose = () => set({ wsConnected: false, wsClient: null });
-
-      ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-
-        switch (message.type) {
-          // NOTE: External changes are NOT received via WebSocket.
-          // They are detected via Vite HMR in useViteHMR hook.
-          // See 03-INTERFACES.md "External Change Detection" section.
-
-          case 'transform-result':
-            if (message.success) {
-              get().markEditCommitted(message.requestId);
-            } else {
-              get().markEditFailed(message.requestId, message.error);
-            }
-            break;
-        }
-      };
-
-      set({ wsClient: ws });
+    // Actions
+    selectElement: (element, target) => {
+      const bounds = element.getBoundingClientRect();
+      set({ selectedElement: { element, target, bounds } });
     },
 
-    disconnect() {
-      get().wsClient?.close();
-      set({ wsConnected: false, wsClient: null });
+    clearSelection: () => set({ selectedElement: null }),
+
+    hoverElement: (element) => {
+      const bounds = element.getBoundingClientRect();
+      set({ hoveredElement: { element, bounds } });
     },
 
-    selectElement(domElement: HTMLElement, target: ElementTarget) {
-      set({
-        selectedElement: {
-          target,
-          domElement,
-          computedStyles: window.getComputedStyle(domElement),
-          bounds: domElement.getBoundingClientRect(),
-        },
-        hoveredElement: null, // Clear hover on select
-      });
+    clearHover: () => set({ hoveredElement: null }),
+
+    startTextEditing: (element, originalText, oid) => {
+      set({ textEdit: { isEditing: true, element, originalText, oid } });
     },
 
-    hoverElement(target: ElementTarget, bounds: DOMRect) {
-      if (get().isTextEditing) return; // Don't hover while editing
-      set({ hoveredElement: { target, bounds } });
-    },
+    commitTextEdit: (newText) => {
+      const { textEdit, selectedElement, wsClient } = get();
+      if (!textEdit.isEditing || !selectedElement?.target) return;
 
-    clearHover() {
-      set({ hoveredElement: null });
-    },
-
-    clearSelection() {
-      set({ selectedElement: null });
-    },
-
-    updateStyle(property: string, value: StyleValue) {
-      const { selectedElement, wsClient, undoStack, maxStackSize } = get();
-      if (!selectedElement || !wsClient) return;
-
-      const editId = crypto.randomUUID();
-
-      // Get previous typed value from authored styles
-      const previousValue = selectedElement.authoredStyles.get(property);
-
-      // 1. Create command for undo (stores typed values for reversibility)
-      const command: Command = {
-        id: editId,
-        type: 'update-style',
-        target: selectedElement.target,
-        before: previousValue ?? null,  // Typed StyleValue
-        after: value,                   // Typed StyleValue
-        timestamp: Date.now(),
-      };
-
-      // 2. Update undo stack (clear redo on new action)
-      const newUndoStack = [...undoStack, command].slice(-maxStackSize);
-
-      // 3. Track pending edit (show loading indicator)
-      // NOTE: No optimistic DOM update for MVP - wait for Vite HMR
-      const pending: PendingEdit = {
-        id: editId,
-        target: selectedElement.target,
-        property,
-        value,  // Typed StyleValue
-        status: 'pending',
-      };
-
-      set(state => ({
-        undoStack: newUndoStack,
-        redoStack: [], // Clear redo on new action
-        pendingEdits: new Map(state.pendingEdits).set(editId, pending),
-      }));
-
-      // 4. Send typed value to server (validated on server side)
-      // Vite HMR will update DOM when server writes file
-      wsClient.send(JSON.stringify({
-        action: 'transform',
-        id: editId,
-        type: 'css-update',
-        target: selectedElement.target,
-        change: { property, value },  // Typed StyleValue
-      }));
-    },
-
-    undo() {
-      const { undoStack, redoStack, wsClient, maxStackSize } = get();
-      if (undoStack.length === 0 || !wsClient) return;
-
-      const command = undoStack[undoStack.length - 1];
-
-      // For style commands, before/after are typed StyleValues
-      if (command.type === 'update-style') {
-        const styleCmd = command as { before: StyleValue | null; after: StyleValue; property: string };
-
-        // Send to server - Vite HMR will update DOM
+      if (newText !== textEdit.originalText && wsClient?.readyState === WebSocket.OPEN) {
         wsClient.send(JSON.stringify({
           action: 'transform',
-          id: crypto.randomUUID(),
-          type: 'css-update',
-          target: command.target,
-          change: { property: styleCmd.property, value: styleCmd.before },
+          type: 'text-update',
+          target: selectedElement.target,
+          change: { originalText: textEdit.originalText, newText },
         }));
       }
 
-      set({
-        undoStack: undoStack.slice(0, -1),
-        redoStack: [...redoStack, command].slice(-maxStackSize),
-      });
+      set({ textEdit: { isEditing: false, element: null, originalText: '', oid: '' } });
     },
 
-    redo() {
-      const { undoStack, redoStack, wsClient, maxStackSize } = get();
-      if (redoStack.length === 0 || !wsClient) return;
-
-      const command = redoStack[redoStack.length - 1];
-
-      // For style commands, before/after are typed StyleValues
-      if (command.type === 'update-style') {
-        const styleCmd = command as { before: StyleValue | null; after: StyleValue; property: string };
-
-        // Send to server - Vite HMR will update DOM
-        wsClient.send(JSON.stringify({
-          action: 'transform',
-          id: crypto.randomUUID(),
-          type: 'css-update',
-          target: command.target,
-          change: { property: styleCmd.property, value: styleCmd.after },
-        }));
+    cancelTextEditing: () => {
+      const { textEdit } = get();
+      if (textEdit.element) {
+        textEdit.element.textContent = textEdit.originalText;
       }
-
-      set({
-        redoStack: redoStack.slice(0, -1),
-        undoStack: [...undoStack, command].slice(-maxStackSize),
-      });
+      set({ textEdit: { isEditing: false, element: null, originalText: '', oid: '' } });
     },
-
-    // Called by useViteHMR hook when Vite detects file changes
-    // NOT called via WebSocket - see 03-INTERFACES.md "External Change Detection"
-    clearPendingEditsForFile(file: string) {
-      const { pendingEdits } = get();
-
-      const newPending = new Map(pendingEdits);
-      for (const [id, edit] of newPending) {
-        if (edit.target.file === file) {
-          newPending.delete(id);
-        }
-      }
-
-      set({ pendingEdits: newPending });
-    },
-
-    clearUndoRedoForFile(file: string) {
-      const { undoStack, redoStack } = get();
-
-      set({
-        undoStack: undoStack.filter(cmd => cmd.target.file !== file),
-        redoStack: redoStack.filter(cmd => cmd.target.file !== file),
-      });
-    },
-
-    refreshSelectedElement() {
-      const { selectedElement } = get();
-      if (!selectedElement) return;
-
-      // Re-read computed styles after HMR updates DOM
-      set({
-        selectedElement: {
-          ...selectedElement,
-          computedStyles: window.getComputedStyle(selectedElement.domElement),
-        },
-      });
-    },
-
-    markEditCommitted(editId: string) {
-      set(state => {
-        const newPending = new Map(state.pendingEdits);
-        const edit = newPending.get(editId);
-        if (edit) {
-          edit.status = 'committed';
-          // Remove after short delay (for UI feedback)
-          setTimeout(() => {
-            set(s => {
-              const p = new Map(s.pendingEdits);
-              p.delete(editId);
-              return { pendingEdits: p };
-            });
-          }, 1000);
-        }
-        return { pendingEdits: newPending };
-      });
-    },
-
-    markEditFailed(editId: string, error: string) {
-      // NOTE: No optimistic update to revert for MVP
-      // Just remove from pending and show error
-      const edit = get().pendingEdits.get(editId);
-      if (edit) {
-        console.error(`Edit failed: ${error}`);
-      }
-
-      set(state => {
-        const newPending = new Map(state.pendingEdits);
-        newPending.delete(editId);
-        return { pendingEdits: newPending };
-      });
-    },
-
-    // ... remaining actions (text editing, variants) follow same pattern
-  }))
-);
+  }));
+}
 ```
 
 ### 3.2 Module: `behaviors/registry.ts`
@@ -1329,518 +1137,376 @@ export const useEditorStore = create<EditorState & EditorActions>()(
 **EditorBehaviorsRegistry** - Defines how the editor responds to user interactions with different element types.
 
 > **Note**: A "behavior" is an editor interaction (double-click to edit text), NOT runtime functionality (button submits form).
-> See [01-ARCHITECTURE.md Decision 6](./01-ARCHITECTURE.md#decision-6-centralized-canvas--editorbehaviorsregistry) for rationale.
 
 ```typescript
-// apps/builder/src/behaviors/registry.ts
+// packages/client/src/behaviors/registry.ts
 
-/**
- * Element capabilities detected from DOM.
- */
-interface ElementCapabilities {
-  textEditable: boolean;    // h1, p, span, label, etc.
-  imageReplaceable: boolean; // img
-  resizable: boolean;        // block-level elements
-  hasChildren: boolean;      // container elements
+export interface BehaviorContext {
+  selectElement: (element: HTMLElement, target: ElementTarget | null) => void;
+  clearSelection: () => void;
+  startTextEditing: (element: HTMLElement, originalText: string, oid: string) => void;
+  commitTextEdit: (newText: string) => void;
+  cancelTextEditing: () => void;
+  getTextEditState: () => TextEditState;
 }
 
-/**
- * Context passed to behavior handlers.
- */
-interface BehaviorContext {
-  element: HTMLElement;
-  target: ElementTarget;
-  capabilities: ElementCapabilities;
-  store: EditorStore;
-}
-
-/**
- * Interface for editor behaviors.
- * Each behavior handles a specific type of editing interaction.
- */
-interface EditorBehavior {
-  /** Unique identifier (e.g., 'text-edit', 'image-replace') */
+export interface EditorBehavior {
   id: string;
+  name: string;
+  priority?: number;
 
-  /** Which elements does this behavior apply to? */
-  appliesTo: (element: HTMLElement, capabilities: ElementCapabilities) => boolean;
+  appliesTo: (element: HTMLElement) => boolean;
 
-  /** Event handlers */
-  onDoubleClick?: (ctx: BehaviorContext) => void;
-  onDragStart?: (ctx: BehaviorContext) => void;
-  onDrag?: (ctx: BehaviorContext, delta: { x: number; y: number }) => void;
-  onDragEnd?: (ctx: BehaviorContext) => void;
-  onKeyDown?: (ctx: BehaviorContext, event: KeyboardEvent) => void;
-
-  /** Overlay component to render when this behavior is active */
-  Overlay?: React.ComponentType<{ element: HTMLElement; onClose: () => void }>;
+  onClick?: (element: HTMLElement, event: MouseEvent, ctx: BehaviorContext) => void;
+  onDoubleClick?: (element: HTMLElement, event: MouseEvent, ctx: BehaviorContext) => void;
+  onKeyDown?: (element: HTMLElement, event: KeyboardEvent, ctx: BehaviorContext) => void;
+  onBlur?: (element: HTMLElement, event: FocusEvent, ctx: BehaviorContext) => void;
 }
 
-/**
- * Registry for editor behaviors.
- * Behaviors register themselves on module load via imports.
- */
 class EditorBehaviorsRegistry {
-  private behaviors = new Map<string, EditorBehavior>();
+  private behaviors: EditorBehavior[] = [];
 
   register(behavior: EditorBehavior): void {
-    if (this.behaviors.has(behavior.id)) {
-      throw new Error(`Behavior "${behavior.id}" already registered`);
-    }
-    this.behaviors.set(behavior.id, behavior);
+    this.behaviors.push(behavior);
+    this.behaviors.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   }
 
-  /**
-   * Find all behaviors that apply to an element.
-   */
-  getBehaviorsFor(element: HTMLElement, capabilities: ElementCapabilities): EditorBehavior[] {
-    return Array.from(this.behaviors.values())
-      .filter(b => b.appliesTo(element, capabilities));
+  getBehaviorsForElement(element: HTMLElement): EditorBehavior[] {
+    return this.behaviors.filter((b) => b.appliesTo(element));
   }
 
-  /**
-   * Get a specific behavior by ID.
-   */
-  get(id: string): EditorBehavior | undefined {
-    return this.behaviors.get(id);
+  getPrimaryBehavior(element: HTMLElement): EditorBehavior | undefined {
+    return this.behaviors.find((b) => b.appliesTo(element));
   }
 }
 
 export const editorBehaviorsRegistry = new EditorBehaviorsRegistry();
 
-/**
- * Detect capabilities from a DOM element.
- */
-export function detectCapabilities(element: HTMLElement): ElementCapabilities {
-  const tagName = element.tagName.toUpperCase();
-  const display = window.getComputedStyle(element).display;
+export const TEXT_EDITABLE_TAGS = [
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'label', 'a',
+  'li', 'td', 'th', 'figcaption', 'caption', 'blockquote', 'cite', 'q',
+];
 
-  return {
-    textEditable: ['H1','H2','H3','H4','H5','H6','P','SPAN','LABEL','A','LI','TD','TH'].includes(tagName),
-    imageReplaceable: tagName === 'IMG',
-    resizable: display === 'block' || display === 'flex' || display === 'grid',
-    hasChildren: element.children.length > 0,
-  };
+export function isTextEditableElement(element: HTMLElement): boolean {
+  return TEXT_EDITABLE_TAGS.includes(element.tagName.toLowerCase());
 }
 ```
 
-### 3.3 Module: `behaviors/handlers/index.ts`
+### 3.3 Module: `behaviors/handlers/text-edit.ts`
 
-**Auto-registration** - import behaviors to register them.
-
-```typescript
-// apps/builder/src/behaviors/handlers/index.ts
-
-// Each import triggers registration via side effect
-import './text-edit';
-import './image-replace';
-import './resize';
-
-// ─────────────────────────────────────────────────────────────
-// TO ADD A NEW BEHAVIOR:
-// 1. Create: apps/builder/src/behaviors/handlers/my-behavior.ts
-// 2. Add import here: import './my-behavior';
-// 3. Done! Canvas will automatically use it.
-// ─────────────────────────────────────────────────────────────
-
-export { editorBehaviorsRegistry, detectCapabilities } from '../registry';
-```
-
-### 3.4 Module: `behaviors/handlers/text-edit.ts`
-
-**Example behavior** - registers itself with the registry on import.
+**Text edit behavior** - registers itself with the registry on import.
 
 ```typescript
-// apps/builder/src/behaviors/handlers/text-edit.ts
-import { editorBehaviorsRegistry, EditorBehavior, BehaviorContext } from '../registry';
+// packages/client/src/behaviors/handlers/text-edit.ts
+import { editorBehaviorsRegistry, isTextEditableElement, type EditorBehavior } from '../registry';
 
 const textEditBehavior: EditorBehavior = {
   id: 'text-edit',
+  name: 'Text Edit',
+  priority: 10,
 
-  appliesTo: (element, capabilities) => capabilities.textEditable,
+  appliesTo: (element) => isTextEditableElement(element),
 
-  onDoubleClick: (ctx) => {
-    const { element, store } = ctx;
+  onDoubleClick(element, event, ctx) {
+    event.preventDefault();
+    event.stopPropagation();
 
-    // Store original text for undo
-    const originalText = element.textContent || '';
+    const oid = element.getAttribute('oid') ?? '';
+    const originalText = element.textContent ?? '';
 
-    // Enable inline editing
     element.contentEditable = 'true';
     element.focus();
 
     // Select all text
     const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
 
-    // Update store
-    store.getState().startTextEditing(ctx.target, originalText);
+    ctx.startTextEditing(element, originalText, oid);
   },
 
-  onKeyDown: (ctx, event) => {
-    if (event.key === 'Escape') {
-      // Cancel editing, restore original
-      ctx.store.getState().cancelTextEditing();
-    } else if (event.key === 'Enter' && !event.shiftKey) {
-      // Commit change
+  onKeyDown(element, event, ctx) {
+    const { isEditing, element: editingElement } = ctx.getTextEditState();
+    if (!isEditing || editingElement !== element) return;
+
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      const newText = ctx.element.textContent || '';
-      ctx.store.getState().commitTextEdit(newText);
+      element.contentEditable = 'false';
+      ctx.commitTextEdit(element.textContent ?? '');
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      element.contentEditable = 'false';
+      ctx.cancelTextEditing();
     }
   },
 
-  // Inline editing overlay (optional - could just use contentEditable)
-  Overlay: undefined,
+  onBlur(element, _event, ctx) {
+    const { isEditing, element: editingElement } = ctx.getTextEditState();
+    if (!isEditing || editingElement !== element) return;
+
+    queueMicrotask(() => {
+      const state = ctx.getTextEditState();
+      if (state.isEditing && state.element === element) {
+        element.contentEditable = 'false';
+        ctx.commitTextEdit(element.textContent ?? '');
+      }
+    });
+  },
 };
 
-// Register on import
 editorBehaviorsRegistry.register(textEditBehavior);
 ```
 
-### 3.5 Component: `Canvas/Canvas.tsx`
+### 3.4 Module: `selection.ts`
 
-Main canvas area. Handles **all** user interactions centrally, delegates to EditorBehaviorsRegistry.
-
-```typescript
-import { editorBehaviorsRegistry, detectCapabilities } from '../behaviors';
-
-interface CanvasProps {
-  children: React.ReactNode; // User's app components
-}
-
-export function Canvas({ children }: CanvasProps) {
-  const {
-    selectedElement,
-    hoveredElement,
-    previewMode,
-    zoom,
-    deviceMode,
-    activeBehavior,
-  } = useEditorStore();
-
-  const canvasRef = useRef<HTMLDivElement>(null);
-
-  // ─────────────────────────────────────────────────────────────
-  // CENTRALIZED EVENT HANDLERS
-  // All interactions go through here, then delegate to behaviors
-  // ─────────────────────────────────────────────────────────────
-
-  const getElementInfo = useCallback((target: HTMLElement) => {
-    const element = target.closest('[oid]') as HTMLElement;
-    if (!element) return null;
-
-    const elementTarget: ElementTarget = {
-      file: element.dataset.alaraFile!,
-      lineNumber: parseInt(element.dataset.alaraLine!, 10),
-      column: parseInt(element.dataset.alaraCol!, 10),
-      cssFile: element.dataset.alaraCss!,
-      selector: element.dataset.alaraSelector!,
-    };
-
-    const capabilities = detectCapabilities(element);
-
-    return { element, target: elementTarget, capabilities };
-  }, []);
-
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    if (previewMode) return;
-    e.preventDefault();  // Prevent button clicks, link navigation, etc.
-
-    const info = getElementInfo(e.target as HTMLElement);
-    if (info) {
-      useEditorStore.getState().selectElement(info.element, info.target);
-    }
-  }, [previewMode, getElementInfo]);
-
-  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
-    if (previewMode) return;
-    e.preventDefault();
-
-    const info = getElementInfo(e.target as HTMLElement);
-    if (!info) return;
-
-    // Find behaviors that apply to this element
-    const behaviors = editorBehaviorsRegistry.getBehaviorsFor(info.element, info.capabilities);
-
-    // Execute first behavior with onDoubleClick handler
-    const behavior = behaviors.find(b => b.onDoubleClick);
-    if (behavior) {
-      const ctx: BehaviorContext = {
-        ...info,
-        store: useEditorStore,
-      };
-      behavior.onDoubleClick!(ctx);
-      useEditorStore.getState().setActiveBehavior(behavior.id);
-    }
-  }, [previewMode, getElementInfo]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (previewMode) return;
-
-    const info = getElementInfo(e.target as HTMLElement);
-    if (info) {
-      const bounds = info.element.getBoundingClientRect();
-      useEditorStore.getState().hoverElement(info.target, bounds);
-    }
-  }, [previewMode, getElementInfo]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!selectedElement || !activeBehavior) return;
-
-    const behavior = editorBehaviorsRegistry.get(activeBehavior);
-    if (behavior?.onKeyDown) {
-      const ctx: BehaviorContext = {
-        element: selectedElement.domElement,
-        target: selectedElement.target,
-        capabilities: detectCapabilities(selectedElement.domElement),
-        store: useEditorStore,
-      };
-      behavior.onKeyDown(ctx, e.nativeEvent);
-    }
-  }, [selectedElement, activeBehavior]);
-
-  // ─────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────
-
-  const deviceWidth = {
-    desktop: '100%',
-    tablet: '768px',
-    mobile: '375px',
-  }[deviceMode];
-
-  // Get active behavior's overlay component
-  const ActiveOverlay = activeBehavior
-    ? editorBehaviorsRegistry.get(activeBehavior)?.Overlay
-    : null;
-
-  return (
-    <div
-      ref={canvasRef}
-      className={styles.canvas}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-      onMouseMove={handleMouseMove}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}  // Enable keyboard events
-      style={{
-        transform: `scale(${zoom / 100})`,
-        transformOrigin: 'top left',
-      }}
-    >
-      <div className={styles.deviceFrame} style={{ width: deviceWidth }}>
-        {children}
-      </div>
-
-      {/* ─────────────────────────────────────────────────────────
-          OVERLAYS: Rendered as siblings, NOT inside elements
-          This avoids CSS interference with user's styles
-          ───────────────────────────────────────────────────────── */}
-      {!previewMode && (
-        <>
-          {hoveredElement && !selectedElement && (
-            <HoverOverlay bounds={hoveredElement.bounds} />
-          )}
-
-          {selectedElement && (
-            <SelectionOverlay
-              bounds={selectedElement.bounds}
-              element={selectedElement.domElement}
-            />
-          )}
-
-          {/* Behavior-specific overlay (e.g., resize handles) */}
-          {ActiveOverlay && selectedElement && (
-            <ActiveOverlay
-              element={selectedElement.domElement}
-              onClose={() => useEditorStore.getState().setActiveBehavior(null)}
-            />
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-```
-
-### 3.6 Component: `Canvas/overlays/SelectionOverlay.tsx`
-
-**Selection overlay** - blue outline around selected element.
+Document-level event handlers for selection and hover.
 
 ```typescript
-interface SelectionOverlayProps {
-  bounds: DOMRect;
-  element: HTMLElement;
+// packages/client/src/selection.ts
+import { parseOid } from '@alara/core/shared';
+import type { EditorStore } from './store';
+import { editorBehaviorsRegistry } from './behaviors/registry';
+
+function findEditableElement(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) return null;
+  return target.closest('[oid]') as HTMLElement | null;
 }
 
-export function SelectionOverlay({ bounds, element }: SelectionOverlayProps) {
-  // Position overlay absolutely based on element bounds
-  const style: React.CSSProperties = {
-    position: 'absolute',
-    top: bounds.top,
-    left: bounds.left,
-    width: bounds.width,
-    height: bounds.height,
-    border: '2px solid #2196F3',
-    pointerEvents: 'none',  // Click through to element
-    zIndex: 9999,
+export function attachSelectionHandlers(store: EditorStore): () => void {
+  const abortController = new AbortController();
+  const { signal } = abortController;
+
+  const handleClick = (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest('[data-alara-overlay]')) return;
+    if (store.getState().textEdit.isEditing) return;
+
+    const element = findEditableElement(e.target);
+    if (element) {
+      e.preventDefault();
+      const oid = element.getAttribute('oid');
+      const target = oid ? parseOid(oid) : null;
+      store.getState().selectElement(element, target);
+    } else {
+      store.getState().clearSelection();
+    }
   };
 
-  return (
-    <div className={styles.selectionOverlay} style={style}>
-      {/* Element tag label */}
-      <div className={styles.tagLabel}>
-        {element.tagName.toLowerCase()}
-        {element.className && `.${element.className.split(' ')[0]}`}
-      </div>
-    </div>
-  );
-}
-```
+  const handleDoubleClick = (e: MouseEvent) => {
+    const element = findEditableElement(e.target);
+    if (!element) return;
 
-### 3.7 Component: `Canvas/overlays/HoverOverlay.tsx`
-
-**Hover overlay** - light highlight on mouse over.
-
-```typescript
-interface HoverOverlayProps {
-  bounds: DOMRect;
-}
-
-export function HoverOverlay({ bounds }: HoverOverlayProps) {
-  const style: React.CSSProperties = {
-    position: 'absolute',
-    top: bounds.top,
-    left: bounds.left,
-    width: bounds.width,
-    height: bounds.height,
-    border: '1px dashed #90CAF9',
-    backgroundColor: 'rgba(33, 150, 243, 0.1)',
-    pointerEvents: 'none',
-    zIndex: 9998,
+    const behavior = editorBehaviorsRegistry.getPrimaryBehavior(element);
+    if (behavior?.onDoubleClick) {
+      behavior.onDoubleClick(element, e, createBehaviorContext(store));
+    }
   };
 
-  return <div className={styles.hoverOverlay} style={style} />;
+  document.addEventListener('click', handleClick, { capture: true, signal });
+  document.addEventListener('dblclick', handleDoubleClick, { capture: true, signal });
+
+  return () => abortController.abort();
 }
 ```
 
-### 3.8 Component: `FloatingToolbox/FloatingToolbox.tsx`
+### 3.5 Module: `overlays.ts`
 
-Context-sensitive editing toolbox positioned near the selected element via Floating UI.
+DOM-based overlay rendering (no React).
 
 ```typescript
-import {
-  useFloating,
-  autoUpdate,
-  offset,
-  flip,
-  shift,
-} from '@floating-ui/react';
+// packages/client/src/overlays.ts
+import type { EditorStore } from './store';
 
-type ToolboxTabId = 'layout' | 'spacing' | 'colors' | 'typography' | 'border' | 'effects' | 'format';
+export function renderOverlays(store: EditorStore): () => void {
+  // Create container
+  const container = document.createElement('div');
+  container.id = 'alara-overlays';
+  container.setAttribute('data-alara-overlay', 'true');
+  container.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;z-index:99999;';
 
-interface FloatingToolboxProps {
-  element: SelectedElement;
-  referenceElement: HTMLElement | null;
-}
+  // Create selection box
+  const selection = document.createElement('div');
+  selection.style.cssText = `
+    position:fixed;pointer-events:none;display:none;
+    border:2px solid #2196F3;background:rgba(33,150,243,0.1);
+  `;
+  container.appendChild(selection);
 
-export function FloatingToolbox({ element, referenceElement }: FloatingToolboxProps) {
-  const activeTab = useEditorStore(state => state.activeToolboxTab);
-  const setActiveTab = useEditorStore(state => state.setActiveToolboxTab);
+  // Create hover box
+  const hover = document.createElement('div');
+  hover.style.cssText = `
+    position:fixed;pointer-events:none;display:none;
+    border:1px dashed #90CAF9;background:rgba(33,150,243,0.05);
+  `;
+  container.appendChild(hover);
 
-  const { refs, floatingStyles, placement } = useFloating({
-    placement: 'top',
-    middleware: [
-      offset(12),
-      flip({ fallbackPlacements: ['bottom'], padding: 80 }),
-      shift({ padding: 12 }),
-    ],
-    whileElementsMounted: autoUpdate,
+  document.body.appendChild(container);
+
+  // Subscribe to store changes
+  const unsubscribe = store.subscribe((state) => {
+    const { selectedElement, hoveredElement, textEdit } = state;
+
+    // Update selection overlay
+    if (selectedElement && !textEdit.isEditing) {
+      const { bounds } = selectedElement;
+      selection.style.display = 'block';
+      selection.style.top = `${bounds.top}px`;
+      selection.style.left = `${bounds.left}px`;
+      selection.style.width = `${bounds.width}px`;
+      selection.style.height = `${bounds.height}px`;
+    } else {
+      selection.style.display = 'none';
+    }
+
+    // Update hover overlay
+    if (hoveredElement && hoveredElement.element !== selectedElement?.element && !textEdit.isEditing) {
+      const { bounds } = hoveredElement;
+      hover.style.display = 'block';
+      hover.style.top = `${bounds.top}px`;
+      hover.style.left = `${bounds.left}px`;
+      hover.style.width = `${bounds.width}px`;
+      hover.style.height = `${bounds.height}px`;
+    } else {
+      hover.style.display = 'none';
+    }
   });
 
-  useLayoutEffect(() => {
-    refs.setReference(referenceElement);
-  }, [referenceElement, refs]);
+  return () => {
+    unsubscribe();
+    container.remove();
+  };
+}
+```
 
-  if (!referenceElement) return null;
+### 3.6 Module: `websocket.ts`
 
-  const tabs = getTabsForElement(element);
+WebSocket connection with reconnection and error handling.
 
-  return (
-    <div
-      ref={refs.setFloating}
-      style={floatingStyles}
-      className={styles.toolbox}
-      data-placement={placement}
-    >
-      <TabBar
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
-      <TabContent activeTab={activeTab} element={element} />
-    </div>
-  );
+```typescript
+// packages/client/src/websocket.ts
+import type { EditorStore } from './store';
+
+export function connectWebSocket(store: EditorStore, url: string): () => void {
+  let ws: WebSocket | null = null;
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 5;
+
+  function connect() {
+    store.getState().setConnectionStatus('connecting');
+
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+      store.getState().setWebSocket(ws);
+      store.getState().setConnectionStatus('connected');
+    };
+
+    ws.onclose = () => {
+      store.getState().setWebSocket(null);
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        store.getState().setConnectionStatus('disconnected');
+        setTimeout(() => {
+          reconnectAttempts++;
+          connect();
+        }, Math.min(1000 * Math.pow(2, reconnectAttempts), 10000));
+      } else {
+        store.getState().setConnectionStatus('error', 'Unable to connect');
+      }
+    };
+  }
+
+  connect();
+
+  return () => {
+    ws?.close();
+    store.getState().setConnectionStatus('disconnected');
+  };
+}
+```
+
+### 3.7 Module: `index.ts`
+
+Entry point that initializes the client.
+
+```typescript
+// packages/client/src/index.ts
+import { createEditorStore } from './store';
+import { attachSelectionHandlers } from './selection';
+import { attachTextEditHandlers } from './text-editing';
+import { renderOverlays } from './overlays';
+import { connectWebSocket } from './websocket';
+
+// Import behaviors to register them
+import './behaviors/handlers/text-edit';
+
+export interface AlaraClientOptions {
+  port?: number;
 }
 
-// Tab configurations based on element type
-function getTabsForElement(element: SelectedElement): ToolboxTabConfig[] {
-  const tagName = element.domElement.tagName.toLowerCase();
+export function initAlaraClient(options: AlaraClientOptions = {}) {
+  const port = options.port ?? 4000;
+  const store = createEditorStore();
 
-  if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'a'].includes(tagName)) {
-    return TEXT_TABS;  // Format, Colors, Typography, Spacing, Effects
-  }
-  if (['div', 'section', 'article', 'main'].includes(tagName)) {
-    return CONTAINER_TABS;  // Layout, Spacing, Colors, Border, Effects
-  }
-  if (tagName === 'img') {
-    return IMAGE_TABS;  // Size, Position, Border, Effects
-  }
-  return DEFAULT_TABS;  // Spacing, Colors, Effects
+  const cleanupFns = [
+    connectWebSocket(store, `ws://localhost:${port}/ws`),
+    attachSelectionHandlers(store),
+    attachTextEditHandlers(store),
+    renderOverlays(store),
+  ];
+
+  console.log('[Alara] Client initialized');
+
+  return {
+    store,
+    destroy: () => cleanupFns.forEach((fn) => fn()),
+  };
 }
 ```
 
 ---
 
-## 4. Runtime Package (`@alara/runtime`)
+## 4. Buildtime Package (`@alara/buildtime`)
 
-Injected into user's app during development.
+Vite plugin that injects `@alara/client` into the user's app during development.
 
 ### 4.1 Module: `vite-plugin.ts`
 
-Vite plugin that **injects source location and CSS Module attributes** on every JSX element.
-These attributes enable the backend to find the correct source files to edit.
-
-**Key responsibilities**:
-1. Inject `oid` attribute on every JSX element (encodes file:line:col)
-2. Inject `css` attribute with resolved CSS Module info (encodes cssFile:selectors)
-3. Inject Alara client script for WebSocket connection
-
-> **Design Decision**: CSS file and selectors are resolved at **build time** by tracing:
-> `className={styles.button}` → `import styles from './Button.module.css'` → `css` attribute
->
-> This is more work upfront but ensures:
-> - No runtime CSS file resolution needed
-> - No ambiguity about which file to edit
-> - Clear scope: only CSS Modules are editable (not global styles)
-> - **No registry needed** - all metadata self-contained in attributes
+Vite plugin that:
+1. Transforms JSX via Babel to inject `oid` attributes for element identification
+2. Injects `@alara/client` via transformIndexHtml to enable visual editing
 
 ```typescript
+// packages/buildtime/src/vite-plugin.ts
 import type { Plugin } from 'vite';
 import { transformSync } from '@babel/core';
+import { babelPluginOid } from './babel-plugin-oid';
 
-export function alaraPlugin(): Plugin {
+export interface AlaraPluginOptions {
+  serverPort?: number;  // Default: 4000
+}
+
+const VIRTUAL_CLIENT_ID = '/@alara/client';
+const RESOLVED_VIRTUAL_CLIENT_ID = '\0@alara/client';
+
+export function alaraPlugin(options: AlaraPluginOptions = {}): Plugin {
+  const serverPort = options.serverPort ?? 4000;
+  let projectRoot = process.cwd();
+
   return {
-    name: 'alara-runtime',
+    name: 'alara',
     enforce: 'pre',
+
+    configResolved(config) {
+      projectRoot = config.root;
+    },
 
     transform(code: string, id: string) {
       // Only transform TSX/JSX in src/
-      if (!id.includes('/src/') ||
-          (!id.endsWith('.tsx') && !id.endsWith('.jsx'))) {
+      if (!id.includes('/src/') || (!id.endsWith('.tsx') && !id.endsWith('.jsx'))) {
         return null;
       }
 
@@ -1849,272 +1515,88 @@ export function alaraPlugin(): Plugin {
         return null;
       }
 
-      // Use Babel to inject oid + css attributes on every JSX element
-      // This transforms:
-      //   import styles from './Button.module.css';
-      //   <div className={`${styles.card} ${styles.primary}`}>
-      // Into:
-      //   <div
-      //     className={...}
-      //     oid="src/components/Card.tsx:12:4"
-      //     css="src/components/Card.module.css:.card .primary"
-      //   >
+      // Transform with Babel to inject oid attributes
       const result = transformSync(code, {
         filename: id,
         plugins: [
-          [require.resolve('./babel-plugin-alara'), {
-            filename: id,
-          }]
+          ['@babel/plugin-syntax-typescript', { isTSX: true }],
+          [babelPluginOid, { root: projectRoot }],
         ],
-        parserOpts: {
-          plugins: ['jsx', 'typescript'],
-        },
+        parserOpts: { plugins: ['jsx', 'typescript'] },
+        sourceMaps: true,
       });
 
-      return result?.code ?? null;
+      return result?.code ? { code: result.code, map: result.map } : null;
     },
 
+    // Inject Alara client script into HTML
     transformIndexHtml(html: string) {
-      // Inject Alara client script (no registry needed)
-      return html.replace(
-        '</head>',
-        `<script type="module" src="/@alara/client"></script></head>`
-      );
+      return {
+        html,
+        tags: [{ tag: 'script', attrs: { type: 'module', src: VIRTUAL_CLIENT_ID }, injectTo: 'head' }],
+      };
     },
 
     resolveId(id: string) {
-      if (id === '/@alara/client') {
-        return '\0@alara/client';
-      }
+      if (id === VIRTUAL_CLIENT_ID) return RESOLVED_VIRTUAL_CLIENT_ID;
     },
 
     load(id: string) {
-      if (id === '\0@alara/client') {
+      if (id === RESOLVED_VIRTUAL_CLIENT_ID) {
         return `
-          // Connect to Alara service
-          const ws = new WebSocket('ws://localhost:4000/ws');
-          ws.onopen = () => console.log('[Alara] Connected');
-          window.__ALARA_WS__ = ws;
-        `;
+import { initAlaraClient } from '@alara/client';
+initAlaraClient({ port: ${serverPort} });
+`;
       }
     },
   };
 }
 ```
 
-### 4.2 Module: `babel-plugin-alara.ts`
+### 4.2 Module: `babel-plugin-oid.ts`
 
-Babel plugin that performs the actual AST transformation. Generates `oid` and `css` attributes on every JSX element.
-
-> **BUILD-TIME RESOLUTION**: This plugin runs during `vite build` / `vite dev`, NOT at runtime.
-> All metadata is encoded directly in the attributes - **no registry needed**.
-> At runtime, the frontend parses `oid` and `css` attributes directly from the DOM.
-
-**Attribute Generation Logic** (all at build time):
-1. On file parse: collect all CSS Module imports (`import X from '*.module.css'`)
-2. Build map: `importName` → `cssFilePath` (e.g., `styles` → `./Button.module.css`)
-3. On each JSX element:
-   - Generate `oid` from file + line + col (e.g., `src/components/Button.tsx:12:4`)
-   - If has `className={X.Y}` or `className={\`${X.Y} ${X.Z}\`}`, resolve CSS file and selectors
-   - Inject `oid` attribute with JSX location
-   - Inject `css` attribute with CSS Module location and selectors
+Babel plugin that injects `oid` attributes on every JSX element for source location tracking.
 
 ```typescript
+// packages/buildtime/src/babel-plugin-oid.ts
 import { declare } from '@babel/helper-plugin-utils';
 import { types as t } from '@babel/core';
 import path from 'path';
 
-interface PluginState {
-  filename: string;
-  cssImports: Map<string, string>;  // BUILD-TIME map: importName → cssFilePath
+interface PluginOptions {
+  root: string;  // Project root directory
 }
 
-export default declare((api) => {
+export const babelPluginOid = declare((api, options: PluginOptions) => {
   api.assertVersion(7);
 
   return {
-    name: 'babel-plugin-alara',
+    name: 'babel-plugin-oid',
 
     visitor: {
-      // Step 1: Collect CSS Module imports
-      ImportDeclaration(path, state: PluginState) {
-        const source = path.node.source.value;
-
-        // Only track CSS Module imports
-        if (!source.endsWith('.module.css')) return;
-
-        const specifier = path.node.specifiers[0];
-        if (specifier?.type === 'ImportDefaultSpecifier') {
-          const importName = specifier.local.name;  // e.g., 'styles'
-
-          // Resolve relative path to project-relative
-          const cssFilePath = resolveCssPath(state.filename, source);
-          state.cssImports.set(importName, cssFilePath);
-        }
-      },
-
-      // Step 2: Generate oid + css attributes for each JSX element
-      JSXOpeningElement(path, state: PluginState) {
-        const { node } = path;
+      JSXOpeningElement(nodePath, state) {
+        const { node } = nodePath;
         const loc = node.loc?.start;
         if (!loc) return;
 
+        // Get relative file path
+        const filename = state.filename ?? '';
+        const relativePath = path.relative(options.root, filename);
+
         // Generate oid: "src/components/Button.tsx:12:4"
-        const oid = `${state.filename}:${loc.line}:${loc.column}`;
+        const oid = `${relativePath}:${loc.line}:${loc.column}`;
 
-        // Try to resolve CSS Module from className
-        const classNameAttr = node.attributes.find(
-          (attr): attr is t.JSXAttribute =>
-            t.isJSXAttribute(attr) && attr.name.name === 'className'
+        // Inject oid attribute
+        node.attributes.push(
+          t.jsxAttribute(t.jsxIdentifier('oid'), t.stringLiteral(oid))
         );
-
-        let cssFile = '';
-        let selectors: string[] = [];
-
-        if (classNameAttr) {
-          const cssInfo = extractCssInfo(classNameAttr, state.cssImports);
-          if (cssInfo) {
-            cssFile = cssInfo.cssFile;
-            selectors = cssInfo.selectors;
-          }
-        }
-
-        // Inject oid attribute: "src/components/Button.tsx:12:4"
-        node.attributes.push(createAttr('oid', oid));
-
-        // Inject css attribute if CSS Module found: "src/Button.module.css:.button .primary"
-        if (cssFile && selectors.length > 0) {
-          const cssValue = `${cssFile}:${selectors.join(' ')}`;
-          node.attributes.push(createAttr('css', cssValue));
-        }
       },
-    },
-
-    pre(state: PluginState) {
-      // Initialize CSS imports map for this file
-      state.cssImports = new Map();
     },
   };
 });
-
-/**
- * Extract CSS file and selectors from className attribute.
- * Handles:
- *   - className={styles.button}
- *   - className={`${styles.button} ${styles.primary}`}
- * Returns: { cssFile: 'src/Button.module.css', selectors: ['.button', '.primary'] }
- */
-function extractCssInfo(
-  attr: t.JSXAttribute,
-  cssImports: Map<string, string>
-): { cssFile: string; selectors: string[] } | null {
-  const value = attr.value;
-
-  if (!t.isJSXExpressionContainer(value)) return null;
-
-  const expr = value.expression;
-  const selectors: string[] = [];
-  let cssFile = '';
-
-  // Simple case: styles.button
-  if (t.isMemberExpression(expr) &&
-      t.isIdentifier(expr.object) &&
-      t.isIdentifier(expr.property)) {
-    const importName = expr.object.name;
-    const className = expr.property.name;
-
-    cssFile = cssImports.get(importName) || '';
-    if (cssFile) {
-      selectors.push(`.${className}`);
-    }
-  }
-
-  // Template literal: `${styles.button} ${styles.primary}`
-  if (t.isTemplateLiteral(expr)) {
-    for (const exprPart of expr.expressions) {
-      if (t.isMemberExpression(exprPart) &&
-          t.isIdentifier(exprPart.object) &&
-          t.isIdentifier(exprPart.property)) {
-        const importName = exprPart.object.name;
-        const className = exprPart.property.name;
-
-        const resolvedCssFile = cssImports.get(importName);
-        if (resolvedCssFile) {
-          // All classes should come from same CSS file
-          if (!cssFile) cssFile = resolvedCssFile;
-          selectors.push(`.${className}`);
-        }
-      }
-    }
-  }
-
-  return selectors.length > 0 ? { cssFile, selectors } : null;
-}
-
-function createAttr(name: string, value: string): t.JSXAttribute {
-  return t.jsxAttribute(
-    t.jsxIdentifier(name),
-    t.stringLiteral(value)
-  );
-}
-
-function resolveCssPath(tsxFile: string, cssImport: string): string {
-  // Convert relative import to project-relative path
-  const dir = path.dirname(tsxFile);
-  return path.join(dir, cssImport);
-}
 ```
 
-**Limitations** (documented scope):
-- Only tracks CSS Modules from same file per element
-- Conditional classes (ternary expressions) not yet tracked
-- Global CSS imports (without `.module.css`) are ignored
-- Inline styles are handled separately (not through this plugin)
-
-### 4.3 Module: `EditorWrapper.tsx`
-
-Wrapper component for **runtime selection context**.
-
-**Separation of concerns**:
-- **`oid` + `css` attributes**: Self-contained attributes injected on JSX elements by Vite plugin. No registry needed.
-- **EditorWrapper**: Provides runtime context for selection/hover overlays and visual editing features.
-
-```typescript
-import { useRef, useEffect, type ReactNode } from 'react';
-
-interface EditorWrapperProps {
-  children: ReactNode;
-}
-
-/**
- * EditorWrapper provides runtime context for visual editing.
- * - Tracks mounted/unmounted state for selection validity
- * - Handles focus management for text editing
- * - Does NOT inject source location attributes (Vite plugin does that)
- */
-export function EditorWrapper({ children }: EditorWrapperProps) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // Register with Alara runtime for selection tracking
-    const element = ref.current;
-    if (element) {
-      window.__ALARA_ELEMENTS__?.add(element);
-      return () => window.__ALARA_ELEMENTS__?.delete(element);
-    }
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      oid="wrapper"
-      style={{ display: 'contents' }} // Don't affect layout
-    >
-      {children}
-    </div>
-  );
-}
-```
+**Note**: The Babel plugin currently only injects `oid` attributes. CSS Module resolution (`css` attribute) is planned for a future iteration.
 
 ---
 
@@ -2145,29 +1627,35 @@ export function EditorWrapper({ children }: EditorWrapperProps) {
 │  │            (atomic file operations with rollback)                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
-                    ▲                                      │
-                    │ WebSocket                            │ serves static
-                    │                                      ▼
-┌───────────────────┴─────────────────────────────────────────────────────┐
-│                            @alara/builder                                │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────────┐   │
-│  │ App.tsx     │→ │ Canvas      │→ │ Properties  │→ │ Toolbar       │   │
-│  └─────────────┘  └─────────────┘  │   Panel     │  └───────────────┘   │
-│                                    └─────────────┘                       │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │                     editorStore (Zustand)                        │    │
-│  │  selection │ pendingEdits │ undoStack │ wsConnection             │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ▲
-                                    │ renders user's app with
-                                    │
-┌───────────────────────────────────┴─────────────────────────────────────┐
-│                           @alara/runtime                                 │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │ vite-plugin.ts  │→ │ EditorWrapper   │→ │ babel-plugin-alara      │  │
-│  │                 │  │     .tsx        │  │ (injects wrappers)      │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────────┘  │
+                           ▲
+                           │ WebSocket
+                           │
+┌──────────────────────────┴──────────────────────────────────────────────┐
+│                     User's Vite App (dev mode)                           │
+│                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  User's React/Vue/etc. Components with oid attributes injected    │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                           ▲                                              │
+│                           │ injected by                                  │
+│  ┌────────────────────────┴──────────────────────────────────────────┐  │
+│  │                  @alara/client (Vanilla JS)                        │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │  │
+│  │  │ selection   │  │ text-edit   │  │ overlays    │                │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘                │  │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
+│  │  │           editorStore (Vanilla Zustand)                      │  │  │
+│  │  │  selection │ textEdit │ connectionStatus │ wsClient          │  │  │
+│  │  └─────────────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                           ▲                                              │
+│                           │ imports                                      │
+│  ┌────────────────────────┴──────────────────────────────────────────┐  │
+│  │                  @alara/buildtime (Vite Plugin)                    │  │
+│  │  ┌─────────────────┐  ┌─────────────────────────────────────────┐ │  │
+│  │  │ vite-plugin.ts  │→ │ babel-plugin-oid (injects oid attrs)    │ │  │
+│  │  └─────────────────┘  └─────────────────────────────────────────┘ │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 

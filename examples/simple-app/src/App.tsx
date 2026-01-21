@@ -15,7 +15,7 @@ function App() {
       <main className="main">
         <Card title="Getting Started">
           <p>I need to change this</p>
-          <p>Edit again in the browswer</p>
+          <p>lo</p>
         </Card>
 
         <Card title="Counter Demo">
@@ -37,7 +37,7 @@ function App() {
       </main>
 
       <footer className="footer">
-        <p>Built with React + Vite + Alara</p>
+        <p>Built By Ivan</p>
       </footer>
     </div>
   );

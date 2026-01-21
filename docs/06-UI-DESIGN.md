@@ -1,6 +1,23 @@
 # 06 - UI Design
 
-This document defines the component hierarchy, layout structure, properties panel design, and interaction patterns for Alara Builder's visual editor interface.
+This document defines the component hierarchy, layout structure, properties panel design, and interaction patterns for Alara's visual editor interface.
+
+---
+
+## Current Implementation: `@alara/client` (Vanilla JS)
+
+The current implementation uses a minimal vanilla JavaScript client (`@alara/client`) that is injected into the user's running Vite app. This client provides:
+
+- **Selection overlays** - Blue outline around selected element, dashed hover indicator
+- **Text editing** - Double-click to edit text inline via `contentEditable`
+- **Connection status** - Visual indicator when disconnected from Alara service
+- **WebSocket communication** - Sends transform requests to the service
+
+The client has **no React dependency** and renders overlays via direct DOM manipulation. For the current client implementation, see [02-MODULE-DESIGN.md Section 3](./02-MODULE-DESIGN.md#3-client-package-alaraclient).
+
+## Future Phases: FloatingToolbox & Advanced UI
+
+The sections below describe the **planned** full visual editor UI with FloatingToolbox panels, toolbar controls, and property editors. These features will be implemented in future phases and may use React or remain vanilla JS depending on requirements.
 
 ---
 

@@ -1,4 +1,5 @@
 import type { ElementTarget } from '@alara/core/shared';
+import type { TextEditState } from '../store.js';
 
 // ============================================================================
 // Types
@@ -16,7 +17,7 @@ export interface BehaviorContext {
   /** Cancel text editing */
   cancelTextEditing: () => void;
   /** Get current text edit state */
-  getTextEditState: () => { isEditing: boolean; element: HTMLElement | null; originalText: string };
+  getTextEditState: () => TextEditState;
 }
 
 export interface EditorBehavior {
@@ -51,6 +52,7 @@ export interface EditorBehavior {
 
   /**
    * Handle blur (focus lost) on the element.
+   * Note: Use focusout event for better bubbling behavior.
    */
   onBlur?: (element: HTMLElement, event: FocusEvent, ctx: BehaviorContext) => void;
 

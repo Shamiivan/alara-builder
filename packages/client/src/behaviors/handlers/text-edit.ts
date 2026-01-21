@@ -3,7 +3,7 @@ import {
   isTextEditableElement,
   type EditorBehavior,
   type BehaviorContext,
-} from '../registry';
+} from '../registry.js';
 
 /**
  * Text Edit Behavior
@@ -12,10 +12,10 @@ import {
  * headings, paragraphs, spans, list items, etc.
  *
  * Flow:
- * 1. Double-click → contentEditable = 'true', focus, select all
+ * 1. Double-click -> contentEditable = 'true', focus, select all
  * 2. Type to edit text
- * 3. Enter/blur → commit changes to server
- * 4. Escape → restore original text, cancel editing
+ * 3. Enter/blur -> commit changes to server
+ * 4. Escape -> restore original text, cancel editing
  */
 const textEditBehavior: EditorBehavior = {
   id: 'text-edit',
@@ -76,14 +76,15 @@ const textEditBehavior: EditorBehavior = {
       return;
     }
 
-    // Small delay to allow for button clicks that might cancel
-    setTimeout(() => {
-      // Check if still in editing state (might have been cancelled)
+    // Use a microtask to allow for button clicks that might cancel
+    // This also handles the race condition better than setTimeout
+    queueMicrotask(() => {
+      // Check if still in editing state (might have been cancelled by escape key)
       const state = ctx.getTextEditState();
       if (state.isEditing && state.element === element) {
         commitEdit(element, ctx);
       }
-    }, 100);
+    });
   },
 };
 

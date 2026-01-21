@@ -6,7 +6,7 @@ Alara Builder is a standalone Bun-based service that provides visual editing cap
 
 ## Package Structure
 
-Monorepo using pnpm workspaces with **apps/** for deployables and **packages/** for shared libraries.
+Monorepo using pnpm workspaces with **packages/** for all libraries.
 This structure follows the **Open/Closed Principle**: add new features by adding files, not modifying existing ones.
 
 ### Project Structure
@@ -17,43 +17,21 @@ alara/
 ├── turbo.json                        # Build orchestration (parallel builds, caching)
 ├── tsconfig.base.json                # Shared TypeScript config
 │
-├── apps/
-│   └── builder/                      # Visual editor UI (React + Vite)
-│       ├── src/
-│       │   ├── App.tsx
-│       │   ├── components/           # Component types colocated here
-│       │   │   ├── Canvas/
-│       │   │   │   ├── Canvas.tsx    # Centralized event handling
-│       │   │   │   ├── Canvas.test.tsx  # ⬅ Unit tests colocated
-│       │   │   │   ├── overlays/     # Selection, Hover, Resize overlays
-│       │   │   │   └── types.ts
-│       │   │   ├── FloatingToolbox/
-│       │   │   ├── Toolbar/
-│       │   │   └── ...
-│       │   ├── behaviors/            # ⬅ EDITOR BEHAVIORS
-│       │   │   ├── registry.ts       #   EditorBehaviorsRegistry defined here
-│       │   │   └── handlers/         #   Add new behaviors here
-│       │   │       ├── index.ts      #   Auto-imports all behaviors
-│       │   │       ├── text-edit.ts  #   Double-click text → inline editing
-│       │   │       ├── resize.ts     #   Drag handles → resize element
-│       │   │       └── ...
-│       │   ├── store/
-│       │   │   ├── index.ts          # Composes slices (add new slices here)
-│       │   │   ├── editorStore.test.ts  # ⬅ Store tests
-│       │   │   └── slices/           # Each slice has its own types
-│       │   │       ├── selection.ts  # SelectionSlice type defined here
-│       │   │       ├── editing.ts
-│       │   │       ├── history.ts
-│       │   │       └── ...
-│       │   ├── __tests__/            # ⬅ GROUPED TESTS
-│       │   │   ├── setup-dom.ts      #   Test setup/globals
-│       │   │   ├── mocks/            #   Mock implementations
-│       │   │   └── fixtures/         #   Test fixtures
-│       │   └── hooks/
-│       ├── package.json
-│       └── vite.config.ts
-│
 ├── packages/
+│   ├── client/                       # ⬅ CLIENT-SIDE EDITOR UI (Vanilla JS/TS)
+│   │   ├── src/                      #   Injected into user's app via Vite plugin
+│   │   │   ├── index.ts              #   initAlaraClient() entry point
+│   │   │   ├── store.ts              #   Vanilla Zustand store (no React)
+│   │   │   ├── selection.ts          #   Click/hover event handlers
+│   │   │   ├── text-editing.ts       #   Keyboard/blur handlers for text edit
+│   │   │   ├── overlays.ts           #   DOM-based overlay rendering
+│   │   │   ├── websocket.ts          #   WS connection with reconnect/error handling
+│   │   │   └── behaviors/            #   ⬅ EDITOR BEHAVIORS
+│   │   │       ├── registry.ts       #     EditorBehaviorsRegistry defined here
+│   │   │       └── handlers/         #     Add new behaviors here
+│   │   │           └── text-edit.ts  #     Double-click text → inline editing
+│   │   └── package.json
+│   │
 │   ├── core/                         
 │   │   ├── src/
 │   │   │   ├── __tests__/            
@@ -116,30 +94,11 @@ alara/
 │   │   │   └── static/
 │   │   └── package.json
 │   │
-│   ├── buildtime/                      # Injected into user's app
+│   ├── buildtime/                    # Vite/Babel plugins for user's app
 │   │   ├── src/
-│   │   │   ├── vite-plugin.ts        # Vite plugin entry point
-│   │   │   ├── babel-plugin-alara.ts # ⬅ CSS MODULE RESOLUTION: Traces className → import → cssFile
-│   │   │   │                         #   Injects: oid + css attributes (self-contained)
-│   │   │   ├── wrapper.tsx           # EditorWrapperProps defined here
-│   │   │   └── client.ts             # Uses shared/messages.ts
-│   │   └── package.json
-│   │
-│   ├── ui/                           # Shared UI components
-│   │   ├── src/
-│   │   │   ├── inputs/               # Input types colocated
-│   │   │   │   ├── ValueInput.tsx    # ValueInputProps defined here
-│   │   │   │   ├── ColorPicker.tsx   # ColorPickerProps defined here
-│   │   │   │   └── ...
-│   │   │   ├── panels/
-│   │   │   │   ├── registry.ts       # PropertyPanelPlugin interface here
-│   │   │   │   └── plugins/
-│   │   │   │       ├── index.ts
-│   │   │   │       ├── padding.tsx
-│   │   │   │       ├── color.tsx
-│   │   │   │       └── ...
-│   │   │   └── overlays/
-│   │   └── package.json
+│   │   │   ├── vite-plugin.ts        # Vite plugin entry point (injects @alara/client)
+│   │   │   └── babel-plugin-oid.ts   # ⬅ Injects oid attributes for element identification
+│   │   └── package.json              # Depends on @alara/client
 │   │
 │   └── tooling/                      # Shared tooling configs (not types)
 │       ├── tsconfig/
@@ -171,29 +130,34 @@ alara/
 ### Package Dependency Graph
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        apps/builder                               │
-│                   (imports from packages)                         │
-└───────────────────────────┬──────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                   User's Vite App (dev mode)                         │
+│  Uses: @alara/buildtime (vite plugin)                                │
+└───────────────────────────┬──────────────────────────────────────────┘
                             │
-              ┌─────────────┼─────────────┐
-              ▼             ▼             ▼
-      ┌───────────┐   ┌───────────┐   ┌───────────┐
-      │packages/ui│   │packages/  │   │packages/  │
-      │           │   │  service  │   │  runtime  │
-      └─────┬─────┘   └─────┬─────┘   └─────┬─────┘
-            │               │               │
-            └───────────────┼───────────────┘
                             ▼
               ┌─────────────────────────┐
-              │     packages/core       │
-              │  ┌───────────────────┐  │
-              │  │  src/shared/      │  │  ← Shared contracts live here
-              │  │  - css-values.ts  │  │
-              │  │  - messages.ts    │  │
-              │  │  - transforms.ts  │  │
-              │  └───────────────────┘  │
-              └─────────────────────────┘
+              │  packages/buildtime     │
+              │  (Vite plugin)          │
+              └───────────┬─────────────┘
+                          │ injects at runtime
+                          ▼
+              ┌─────────────────────────┐
+              │  packages/client        │  ← Vanilla JS, runs in browser
+              │  - selection handlers   │
+              │  - overlay rendering    │
+              │  - text editing         │
+              │  - WS connection        │
+              └───────────┬─────────────┘
+                          │
+              ┌───────────┴───────────┐
+              ▼                       ▼
+  ┌─────────────────────┐   ┌─────────────────────┐
+  │  packages/core      │   │  packages/service   │
+  │  - shared types     │   │  - Bun server       │
+  │  - css-values.ts    │   │  - WS handler       │
+  │  - elements.ts      │   │  - transforms       │
+  └─────────────────────┘   └─────────────────────┘
 ```
 
 ### Type Location Guide
@@ -214,10 +178,8 @@ alara/
 | To Add... | Create File In... | Register In... |
 |-----------|-------------------|----------------|
 | New transform type | `packages/core/src/transforms/handlers/` | `handlers/index.ts` (import) |
-| New editor behavior | `apps/builder/src/behaviors/handlers/` | `handlers/index.ts` (import) |
-| New property editor | `packages/ui/src/panels/plugins/` | `plugins/index.ts` (import) |
+| New editor behavior | `packages/client/src/behaviors/handlers/` | `handlers/index.ts` (import) |
 | New StyleValue type | `packages/core/src/shared/css-values.ts` | Type registry interface |
-| New store slice | `apps/builder/src/store/slices/` | `store/index.ts` (compose) |
 | New API endpoint | `packages/service/src/api/handlers/` | Route registry |
 | New shared type | `packages/core/src/shared/` | Export from `index.ts` |
 
@@ -243,28 +205,37 @@ Tests live in **their own files**, not in documentation. Test files are colocate
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         USER'S BROWSER                                       │
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                    Builder UI (React)                                   ││
-│  │  ┌──────────────┐  ┌────────────────────────────────────────────────┐  ││
-│  │  │   Toolbar    │  │                    Canvas                       │  ││
-│  │  │              │  │   ┌──────────┐  ┌─────────────────────────┐    │  ││
-│  │  │ [Pointer]    │  │   │  User's  │  │   FloatingToolbox       │    │  ││
-│  │  │ [Text]       │  │   │  Website │  │  [Layout][Spacing]...   │    │  ││
-│  │  │ [Preview]    │  │   │ (direct  │  └─────────────────────────┘    │  ││
-│  │  │              │  │   │ render)  │      ↑ positioned via           │  ││
-│  │  └──────────────┘  │   └──────────┘      Floating UI               │  ││
-│  │                    │   + Selection Overlay                          │  ││
-│  │                    └────────────────────────────────────────────────┘  ││
-│  │                              │                                          ││
-│  │                    ┌─────────▼────────────────────────▼─────────┐       ││
-│  │                    │           Editor Store (Zustand)            │       ││
-│  │                    │  - selectedElement    - pendingEdits        │       ││
-│  │                    │  - hoveredElement     - undoStack           │       ││
-│  │                    │  - editingState       - wsConnection        │       ││
-│  │                    └─────────────────────────┬───────────────────┘       ││
-│  └──────────────────────────────────────────────┼───────────────────────────┘│
-│                                                 │                            │
-│                                    WebSocket    │                            │
-└─────────────────────────────────────────────────┼────────────────────────────┘
+│  │                    User's React App + Alara Client                      ││
+│  │                                                                          ││
+│  │   ┌───────────────────────────────────────────────────────────────────┐ ││
+│  │   │                    User's Website Content                          │ ││
+│  │   │                                                                    │ ││
+│  │   │    Elements have `oid` attributes injected by Babel plugin         │ ││
+│  │   │    <button oid="src/App.tsx:12:4">Click me</button>                │ ││
+│  │   │                                                                    │ ││
+│  │   └───────────────────────────────────────────────────────────────────┘ ││
+│  │                                                                          ││
+│  │   ┌───────────────────────────────────────────────────────────────────┐ ││
+│  │   │               @alara/client (Vanilla JS, injected)                 │ ││
+│  │   │                                                                    │ ││
+│  │   │   ┌─────────────┐  ┌─────────────┐  ┌──────────────────────────┐  │ ││
+│  │   │   │ Selection   │  │ Text Edit   │  │ DOM Overlays             │  │ ││
+│  │   │   │ Handlers    │  │ Handlers    │  │ - Selection box (blue)   │  │ ││
+│  │   │   │ (click/     │  │ (dblclick,  │  │ - Hover box (dashed)     │  │ ││
+│  │   │   │  hover)     │  │  keyboard)  │  │ - Status indicator       │  │ ││
+│  │   │   └─────────────┘  └─────────────┘  └──────────────────────────┘  │ ││
+│  │   │                          │                                         │ ││
+│  │   │   ┌──────────────────────▼────────────────────────────────────┐   │ ││
+│  │   │   │           Editor Store (Vanilla Zustand)                   │   │ ││
+│  │   │   │  - selectedElement    - pendingEdits                       │   │ ││
+│  │   │   │  - hoveredElement     - connectionStatus                   │   │ ││
+│  │   │   │  - textEditState      - wsClient                           │   │ ││
+│  │   │   └──────────────────────────────────┬────────────────────────┘   │ ││
+│  │   └──────────────────────────────────────┼────────────────────────────┘ ││
+│  └──────────────────────────────────────────┼──────────────────────────────┘│
+│                                             │                                │
+│                                WebSocket    │                                │
+└─────────────────────────────────────────────┼────────────────────────────────┘
                                                   │
 ┌─────────────────────────────────────────────────▼────────────────────────────┐
 │                        ALARA SERVICE (Bun)                                   │
@@ -435,21 +406,22 @@ External file changes are detected via **Vite HMR**, not WebSocket. This elimina
 
 ## Key Design Decisions
 
-### Decision 1: Direct Rendering (No Iframe)
+### Decision 1: Client-Side Injection (No Iframe)
 
-**Choice**: Render user's app directly in Builder using React's component composition.
+**Choice**: Inject Alara client directly into user's running app via Vite plugin.
 
 **Implementation**:
-- User's app components are imported and rendered inside Builder's Canvas
-- EditorWrapper components injected around selectable elements
-- Selection overlays rendered as siblings (not children) to avoid style conflicts
-- Use CSS `pointer-events` to control interaction mode
+- `@alara/buildtime` Vite plugin injects `@alara/client` into the app
+- Client runs alongside user's app, not in a separate frame
+- Selection overlays rendered via DOM manipulation with fixed positioning
+- Uses `pointer-events: none` on overlays to avoid capturing clicks
 
 **Trade-offs**:
 - Pro: Simpler event handling, no postMessage bridging
-- Pro: Direct access to React component tree
-- Con: Need careful CSS isolation for editor UI
-- Con: Editor styles could theoretically conflict (mitigate with unique prefixes)
+- Pro: Direct access to DOM elements with `oid` attributes
+- Pro: No React dependency - works with any framework
+- Con: Need careful CSS isolation for editor overlays (mitigate with unique prefixes, z-index)
+- Con: Must handle cases where user app removes/recreates elements
 
 ### Decision 2: Command Pattern for Undo/Redo
 
@@ -556,8 +528,7 @@ Alara only supports editing **CSS Module** styles. The following are NOT editabl
 | Registry | Purpose | Location |
 |----------|---------|----------|
 | `transformRegistry` | Transform handlers (css-update, text-update, etc.) | `packages/core/src/transforms/` |
-| `editorBehaviorsRegistry` | Editor behaviors (text-edit, resize, etc.) | `apps/builder/src/behaviors/` |
-| `toolboxTabRegistry` | Toolbox tab panels (spacing, colors, etc.) | `apps/builder/src/components/FloatingToolbox/panels/` |
+| `editorBehaviorsRegistry` | Editor behaviors (text-edit, resize, etc.) | `packages/client/src/behaviors/` |
 | `StyleValueTypeRegistry` | CSS value types (unit, color, tuple, etc.) | `packages/core/src/shared/css-values.ts` |
 | `routeRegistry` | API endpoint handlers | `packages/service/src/api/` |
 
@@ -599,29 +570,26 @@ import './add-variant';   // Registers on import
 - Type-safe via Zod validation at registration
 - Discoverable (registry can list all registered types)
 
-### Decision 6: Centralized Canvas + EditorBehaviorsRegistry
+### Decision 6: Centralized Event Handlers + EditorBehaviorsRegistry
 
-**Choice**: Canvas handles all user interactions centrally, delegates to EditorBehaviorsRegistry for element-specific responses.
+**Choice**: Document-level event handlers delegate to EditorBehaviorsRegistry for element-specific responses.
 
-**Architecture**:
+**Architecture** (Vanilla JS):
 ```
-Canvas (centralized event handling)
-├── handles: click, hover, doubleClick, drag, keyboard
-├── delegates to: EditorBehaviorsRegistry
+@alara/client (injected into user's app)
+├── selection.ts - document-level click/hover handlers
+├── text-editing.ts - document-level keyboard/focusout handlers
+├── overlays.ts - DOM-based overlay rendering
 │
-EditorBehaviorsRegistry (Open/Closed principle)
-├── 'select': SelectBehavior (default for all elements)
-├── 'text-edit': TextEditBehavior (text elements only)
-├── 'image-replace': ImageReplaceBehavior (images only)
-├── 'resize': ResizeBehavior (block elements)
-└── ... add new behaviors without modifying Canvas
+└── behaviors/registry.ts - EditorBehaviorsRegistry
+    ├── 'text-edit': TextEditBehavior (text elements only)
+    └── ... add new behaviors without modifying handlers
 
-Overlays (rendered as Canvas siblings, NOT inside elements)
-├── SelectionOverlay (blue outline around selected element)
-├── HoverOverlay (light highlight on hover)
-├── TextEditingOverlay (contentEditable UI)
-├── ResizeHandlesOverlay (corner/edge drag handles)
-└── ... add new overlays without modifying Canvas
+Overlays (rendered via DOM manipulation, fixed positioning)
+├── Selection box (blue outline around selected element)
+├── Hover box (dashed outline on hover)
+├── Status indicator (connection status)
+└── ... add new overlays in overlays.ts
 ```
 
 **What is a "Behavior"?**
@@ -630,28 +598,25 @@ A behavior defines how the editor responds when a user interacts with an element
 
 | User Action | Element Type | Behavior Triggered |
 |-------------|--------------|-------------------|
-| Single click | Any | `select` → show outline, show FloatingToolbox |
+| Single click | Any | `select` → show outline |
 | Double click | `<h1>`, `<p>`, `<span>` | `text-edit` → enter inline editing mode |
-| Double click | `<img>` | `image-replace` → open image picker |
-| Drag edge | `<div>`, `<section>` | `resize` → update width/height |
+| Double click | `<img>` | `image-replace` → open image picker (future) |
 
 **EditorBehaviorsRegistry Interface**:
 ```typescript
 interface EditorBehavior {
   id: string;
+  name: string;
+  priority?: number;  // Higher = checked first
 
   // Which elements does this behavior apply to?
-  appliesTo: (element: HTMLElement, capabilities: ElementCapabilities) => boolean;
+  appliesTo: (element: HTMLElement) => boolean;
 
   // What events does this behavior handle?
-  onDoubleClick?: (element: HTMLElement, ctx: BehaviorContext) => void;
-  onDragStart?: (element: HTMLElement, ctx: BehaviorContext) => void;
-  onDrag?: (element: HTMLElement, delta: Point, ctx: BehaviorContext) => void;
-  onDragEnd?: (element: HTMLElement, ctx: BehaviorContext) => void;
+  onClick?: (element: HTMLElement, event: MouseEvent, ctx: BehaviorContext) => void;
+  onDoubleClick?: (element: HTMLElement, event: MouseEvent, ctx: BehaviorContext) => void;
   onKeyDown?: (element: HTMLElement, event: KeyboardEvent, ctx: BehaviorContext) => void;
-
-  // What overlay should be shown when this behavior is active?
-  overlay?: React.ComponentType<{ element: HTMLElement }>;
+  onBlur?: (element: HTMLElement, event: FocusEvent, ctx: BehaviorContext) => void;
 }
 ```
 
@@ -659,11 +624,12 @@ interface EditorBehavior {
 
 | Aspect | Centralized + Registry | Per-Element Wrappers |
 |--------|----------------------|---------------------|
-| Add new behavior | 1 file (behavior) + 1 file (overlay) | New wrapper + Babel plugin update |
-| Fix selection bug | 1 file (Canvas or SelectBehavior) | Every wrapper |
+| Add new behavior | 1 file (behavior) | New wrapper + Babel plugin update |
+| Fix selection bug | 1 file (selection.ts) | Every wrapper |
 | Event coordination | ✅ Easy (single event stream) | Hard (distributed handlers) |
 | Performance | ✅ One handler per event type | Handler per element |
 | CSS interference | ✅ None (no wrapper DOM nodes) | Possible |
+| React dependency | ✅ None (vanilla JS) | Required |
 
 **Inspired by**: Onlook's architecture (attributes + centralized overlay management)
 
@@ -674,7 +640,8 @@ interface EditorBehavior {
 | **Service Runtime** | Bun | Fast startup, native TS, built-in file watching |
 | **CSS Parsing** | PostCSS | Battle-tested, preserves formatting, plugin ecosystem |
 | **JSX Parsing** | ts-morph | TypeScript-native, high-level AST API |
-| **Builder State** | Zustand | Minimal boilerplate, subscription-based updates |
+| **Client State** | Zustand (vanilla) | Framework-agnostic, subscription-based updates |
+| **Client Rendering** | Vanilla DOM | No React dependency, minimal bundle size |
 | **WebSocket** | Bun.serve() | Native WebSocket support, single server |
 | **File Watching** | Bun.watch() | Native, cross-platform, efficient |
 | **CLI** | Commander.js | Standard Node CLI framework |
@@ -693,21 +660,22 @@ interface EditorBehavior {
 
 ## Decided Questions
 
-### Q1: Builder UI Hosting
-**Decision**: Alara service serves built React app at `localhost:4000`
+### Q1: Client Architecture
+**Decision**: Inject `@alara/client` directly into user's running Vite app
 
-- Single Bun server handles both API and static file serving
-- Builder UI built with Vite, output to `service/src/static/`
-- No dependency on user's dev server for hosting
+- No separate Builder UI app - client runs alongside user's app
+- Alara service at `localhost:4000` handles WebSocket and file transforms
+- User runs `alara dev` in one terminal, `npm run dev` in another
+- Client is vanilla JS/TS, no React dependency
 
-### Q2: EditorWrapper Injection & Attribute Injection
-**Decision**: Vite plugin transforms JSX at build time
+### Q2: Attribute Injection & Client Injection
+**Decision**: Vite plugin handles both at build time
 
-- Runtime package `@alara/runtime` provides the Vite plugin
+- `@alara/buildtime` provides the Vite plugin
 - Plugin runs during dev mode only (production builds unaffected)
-- **Attribute injection**: Adds `oid` and `css` attributes to every JSX element (self-contained, no registry)
-- **EditorWrapper**: Wraps components to provide selection/hover context at runtime
-- Attributes are used by backend to find source locations; wrappers are for visual editing UI
+- **Attribute injection**: Babel plugin adds `oid` attribute to every JSX element
+- **Client injection**: Vite plugin injects `@alara/client` via transformIndexHtml
+- Attributes are used by client to find source locations and send transforms to backend
 
 ### Q3: Multi-File Edits
 **Decision**: Atomic transactions with rollback on failure

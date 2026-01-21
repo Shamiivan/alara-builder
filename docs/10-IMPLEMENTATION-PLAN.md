@@ -10,31 +10,37 @@ Vertical slice approach: each phase delivers a working feature end-to-end (UI �
 |-------|--------|-------|
 | Phase 0: Walking Skeleton | Complete | CLI, Vite plugin shell, Bun server, client runtime, integration test |
 | Phase 1: Type Foundation | Complete | Zod schemas, CSS parser, color parser, value serializer |
-| Phase 2+ | In progress| Vertical slices below |
+| Phase 2: Text Editing | Complete | `@alara/client` package (vanilla JS), selection overlays, text editing |
+| Phase 3+ | In progress | Vertical slices below |
+
+### Architecture Refactor (Completed)
+
+Created `packages/client/` as vanilla JS package (no React):
+- Deleted `apps/builder/` - consolidated duplicate selection/overlay logic
+- `@alara/buildtime` vite-plugin now imports `@alara/client`
+- Reduced vite-plugin.ts from 400-line string template to ~96 lines
 
 ---
 
-## Phase 2: Text Editing (First Vertical Slice)
+## Phase 2: Text Editing (First Vertical Slice) ✅ COMPLETE
 
+| Slice | Description | Status |
+|-------|-------------|--------|
+| **2.1 Babel Plugin (oid only)** | Inject `oid="{file}:{line}:{col}"` attribute on JSX elements | ✅ |
+| **2.2 JSX Transformer** | ts-morph utilities: `findElementAt(file, line, col)`, `updateTextContent(element, text)` | ✅ |
+| **2.3 Selection System** | Click detection on elements with `oid`, parse attribute, store in Zustand | ✅ |
+| **2.4 Selection Overlay** | Blue outline positioned via `getBoundingClientRect()` on selected element | ✅ |
+| **2.5 Text Edit Behavior** | Double-click → `contentEditable=true`, commit on Enter/blur | ✅ |
+| **2.6 Server: text-update** | WebSocket handler: receive `{type: 'text-update', oid, text}`, call JSX transformer | ⏳ Server-side pending |
+| **2.7 E2E Test** | Double-click text → edit → blur → file changes → Vite HMR updates DOM | ⏳ Pending |
 
-| Slice | Description |
-|-------|-------------|
-| **2.1 Babel Plugin (oid only)** | Inject `oid="{file}:{line}:{col}"` attribute on JSX elements. Use @rollup/plugin-babel in Vite. |
-| **2.2 JSX Transformer** | ts-morph utilities: `findElementAt(file, line, col)`, `updateTextContent(element, text)` |
-| **2.3 Selection System** | Click detection on elements with `oid`, parse attribute, store in Zustand |
-| **2.4 Selection Overlay** | Blue outline positioned via `getBoundingClientRect()` on selected element |
-| **2.5 Text Edit Behavior** | Double-click → `contentEditable=true`, commit on Enter/blur |
-| **2.6 Server: text-update** | WebSocket handler: receive `{type: 'text-update', oid, text}`, call JSX transformer |
-| **2.7 E2E Test** | Double-click text → edit → blur → file changes → Vite HMR updates DOM |
-
-**Infrastructure built:**
-- Babel plugin foundation (extend for `css` attribute later)
-- Vite plugin + Babel integration
-- WebSocket message routing
-- Selection state (Zustand)
-- Editor behavior pattern
-- ts-morph utilities
-- Transform handler pattern
+**Implementation:**
+- Created `packages/client/` with vanilla Zustand store (no React)
+- Selection handlers in `src/selection.ts`, text editing in `src/text-editing.ts`
+- DOM-based overlays in `src/overlays.ts` (no React components)
+- Behavior registry pattern in `src/behaviors/registry.ts`
+- WebSocket connection with reconnection in `src/websocket.ts`
+- Vite plugin imports `@alara/client` and injects via transformIndexHtml
 
 ---
 
@@ -303,15 +309,22 @@ Client                          Server
   │                                │
 ```
 
-### Selection State (Zustand)
+### Selection State (Vanilla Zustand)
 
 ```typescript
-interface SelectionSlice {
-  selectedOid: string | null;
-  selectedCss: string | null;
-  select: (oid: string, css: string | null) => void;
-  deselect: () => void;
+// packages/client/src/store.ts
+import { createStore } from 'zustand/vanilla';  // NOT 'zustand' (React hooks)
+
+interface EditorState {
+  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
+  wsClient: WebSocket | null;
+  selectedElement: { element: HTMLElement; target: ElementTarget | null; bounds: DOMRect } | null;
+  hoveredElement: { element: HTMLElement; bounds: DOMRect } | null;
+  textEdit: { isEditing: boolean; element: HTMLElement | null; originalText: string; oid: string };
 }
+
+// Usage: store.getState().selectElement(element, target)
+// Subscribe: store.subscribe((state) => { ... })
 ```
 
 ---
@@ -320,8 +333,8 @@ interface SelectionSlice {
 
 | Phase | New Dependencies |
 |-------|------------------|
-| 2 | @rollup/plugin-babel, @babel/core, ts-morph |
-| 3 | @floating-ui/react |
+| 2 | zustand (vanilla), @alara/core, @babel/core (for vite plugin) |
+| 3 | @floating-ui/dom (vanilla, not @floating-ui/react) |
 | 4 | (uses existing colorjs.io) |
 | 7 | (no new deps - uses existing PostCSS) |
 
