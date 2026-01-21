@@ -4,7 +4,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { createServer } from '../src/server';
+import { createServer } from '../server';
 
 const TEST_PORT = 4001;
 let server: ReturnType<typeof createServer>;

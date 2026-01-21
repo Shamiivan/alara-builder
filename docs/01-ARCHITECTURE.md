@@ -45,11 +45,11 @@ alara/
 │       │   │       ├── editing.ts
 │       │   │       ├── history.ts
 │       │   │       └── ...
+│       │   ├── __tests__/            # ⬅ GROUPED TESTS
+│       │   │   ├── setup-dom.ts      #   Test setup/globals
+│       │   │   ├── mocks/            #   Mock implementations
+│       │   │   └── fixtures/         #   Test fixtures
 │       │   └── hooks/
-│       ├── test/                     
-│       │   ├── setup-dom.ts          
-│       │   ├── mocks/                
-│       │   └── fixtures/             
 │       ├── package.json
 │       └── vite.config.ts
 │
@@ -90,6 +90,15 @@ alara/
 │   │
 │   ├── service/                      # Bun backend server
 │   │   ├── src/
+│   │   │   ├── __tests__/            # ⬅ UNIT & INTEGRATION TESTS
+│   │   │   │   ├── integration.test.ts
+│   │   │   │   ├── transform-flow.test.ts
+│   │   │   │   ├── ws-protocol.test.ts
+│   │   │   │   ├── fixtures/         #   CSS/JSX fixture files
+│   │   │   │   │   ├── css/
+│   │   │   │   │   └── jsx/
+│   │   │   │   └── mocks/            #   WebSocket, filesystem mocks
+│   │   │   │
 │   │   │   ├── server.ts
 │   │   │   ├── api/
 │   │   │   │   ├── router.ts         # Route types colocated
@@ -105,16 +114,6 @@ alara/
 │   │   │   ├── watcher/
 │   │   │   │   └── FileWatcher.ts
 │   │   │   └── static/
-│   │   ├── test/                     # ⬅ TEST INFRASTRUCTURE
-│   │   │   ├── setup.ts              #   Test setup/globals
-│   │   │   ├── fixtures/             #   CSS/JSX fixture files
-│   │   │   │   ├── css/
-│   │   │   │   └── jsx/
-│   │   │   ├── mocks/                #   WebSocket, filesystem mocks
-│   │   │   ├── helpers.ts            #   Test helper functions
-│   │   │   └── integration/          #   Integration tests
-│   │   │       ├── transform-flow.test.ts
-│   │   │       └── ws-protocol.test.ts
 │   │   └── package.json
 │   │
 │   ├── buildtime/                      # Injected into user's app
@@ -224,17 +223,16 @@ alara/
 
 ### Test File Locations
 
-Tests live in **their own files**, not in documentation. Test files are colocated with the code they test.
+Tests live in **their own files**, not in documentation. Test files are colocated with the code they test or grouped in `__tests__/` directories.
 
 | Test Type | Location | Naming Convention |
 |-----------|----------|-------------------|
 | **Unit tests** (colocated) | Next to source file | `*.test.ts` / `*.test.tsx` |
 | **Unit tests** (grouped) | `packages/*/src/__tests__/` | `*.test.ts` |
-| **Integration tests** | `packages/service/test/integration/` | `*-flow.test.ts` |
+| **Integration tests** | `packages/*/src/__tests__/` | `*-flow.test.ts` |
 | **E2E tests** | `e2e/` | `*.spec.ts` |
-| **Test fixtures** | `packages/*/test/fixtures/` | CSS/JSX files |
-| **Test mocks** | `packages/*/test/mocks/` | `*.ts` |
-| **Test helpers** | `packages/*/test/helpers.ts` | Single file |
+| **Test fixtures** | `packages/*/src/__tests__/fixtures/` | CSS/JSX files |
+| **Test mocks** | `packages/*/src/__tests__/mocks/` | `*.ts` |
 
 > **Note**: For testing strategy and rationale, see [09-TESTING.md](./09-TESTING.md).
 > For test interface definitions, see [03-INTERFACES.md](./03-INTERFACES.md#8-testing-interfaces).
